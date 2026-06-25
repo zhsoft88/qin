@@ -396,9 +396,10 @@ func (r *Repository) copyObjectFromRemote(remoteURL string, hash core.Hash) erro
 
 // ---- High-level operations ----
 
-// Fetch fetches all objects and remote-tracking refs from the named remote.
+// Fetch fetches remote-tracking refs and all non-LFS objects from the named
+// remote. LFS chunk data is skipped — use LfsPull to retrieve on demand.
 func (r *Repository) Fetch(remoteName string) error {
-	return r.fetch(remoteName, false)
+	return r.fetch(remoteName, true)
 }
 
 // fetch is the internal implementation of Fetch. When lazy is true,
