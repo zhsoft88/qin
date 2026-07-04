@@ -28,13 +28,13 @@ func (r *Repository) Stash() error {
 	// Build tree from current index
 	treeEntries := make([]TreeEntry, 0, len(idx.Entries))
 	for path, entry := range idx.Entries {
-		cleanPath, osTag := parseKey(path)
+		cleanPath, _ := parseKey(path)
 		treeEntries = append(treeEntries, TreeEntry{
-			Name: cleanPath,
-			Hash: entry.Hash,
-			Size: entry.Size,
-			Mode: entry.Mode,
-			OS:   osTag,
+			Name:   cleanPath,
+			Hash:   entry.Hash,
+			Size:   entry.Size,
+			Mode:   entry.Mode,
+			OSS:    entry.OSS,
 		})
 	}
 
@@ -128,9 +128,9 @@ func (r *Repository) StashPop() error {
 		// Determine the winning entry for the current OS
 		var winner *TreeEntry
 		for _, e := range group.entries {
-			if matchOS(e.OS, cOS) {
+			if osMatch(e.OSS, cOS) {
 				winner = &e
-				if e.OS != 0 && e.OS == cOS {
+				if len(e.OSS) == 1 && e.OSS[0] == cOS {
 					break
 				}
 			}
@@ -138,12 +138,12 @@ func (r *Repository) StashPop() error {
 		if winner == nil {
 			// No matching OS variant — add to index, skip working tree
 			for _, e := range group.entries {
-				key := entryKey(name, e.OS)
+				key := entryKey(name, osIDForKey(e.OSS))
 				newIndex.Entries[key] = IndexEntry{
 					Hash: e.Hash,
 					Size: e.Size,
 					Mode: e.Mode,
-					OS:   e.OS,
+					OSS:              e.OSS,
 				}
 			}
 			continue
@@ -180,7 +180,7 @@ func (r *Repository) StashPop() error {
 
 		// Add all OS variants to index (default + OS-specific)
 		for _, e := range group.entries {
-			key := entryKey(name, e.OS)
+			key := entryKey(name, osIDForKey(e.OSS))
 			var contentHash core.Hash
 			if e.Hash == winner.Hash {
 				contentHash = core.HashFromBytes(fileData)
@@ -195,7 +195,7 @@ func (r *Repository) StashPop() error {
 				ContentHash: contentHash,
 				Size:        e.Size,
 				Mode:        e.Mode,
-				OS:          e.OS,
+				OSS:              e.OSS,
 			}
 		}
 	}

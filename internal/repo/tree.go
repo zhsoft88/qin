@@ -14,7 +14,7 @@ type TreeEntry struct {
 	Hash core.Hash `json:"hash"`
 	Size int64     `json:"size"`
 	Mode uint32    `json:"mode"`
-	OS   uint8     `json:"os,omitempty"` // target OS ID; 0 = all OSes
+		OSS []uint8     // list of OS IDs the entry applies to; empty = all OSes
 }
 
 // Tree is a directory snapshot — an ordered list of file entries.
@@ -35,13 +35,13 @@ func (r *Repository) BuildTree() (*Tree, error) {
 
 	entries := make([]TreeEntry, 0, len(files))
 	for key, entry := range files {
-		path, os := parseKey(key)
+		path, _ := parseKey(key)
 		entries = append(entries, TreeEntry{
-			Name: path,
-			Hash: entry.Hash,
-			Size: entry.Size,
-			Mode: entry.Mode,
-			OS:   os,
+			Name:   path,
+			Hash:   entry.Hash,
+			Size:   entry.Size,
+			Mode:   entry.Mode,
+			OSS:    entry.OSS,
 		})
 	}
 

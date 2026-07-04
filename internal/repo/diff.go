@@ -204,7 +204,7 @@ func (r *Repository) DiffIndex() (*Diff, error) {
 
 	headMap := make(map[string]TreeEntry, len(headTree.Entries))
 	for _, e := range headTree.Entries {
-		headMap[entryKey(e.Name, e.OS)] = e
+		headMap[entryKey(e.Name, osIDForKey(e.OSS))] = e
 	}
 
 	idx, err := r.LoadIndex()
@@ -234,7 +234,7 @@ func (r *Repository) DiffIndex() (*Diff, error) {
 		case DiffAdded:
 			if f.NewSize > 0 && f.NewSize <= diff.maxSize {
 				for _, e := range headTree.Entries {
-					if e.Name == f.Name && matchOS(e.OS, cOS) {
+					if e.Name == f.Name && osMatch(e.OSS, cOS) {
 						blob, err := r.LoadFileContent(e.Hash)
 						if err == nil {
 							diff.Files[i].NewContent = blob
@@ -246,7 +246,7 @@ func (r *Repository) DiffIndex() (*Diff, error) {
 		case DiffDeleted:
 			if f.OldSize > 0 && f.OldSize <= diff.maxSize {
 				for _, e := range headTree.Entries {
-					if e.Name == f.Name && matchOS(e.OS, cOS) {
+					if e.Name == f.Name && osMatch(e.OSS, cOS) {
 						blob, err := r.LoadFileContent(e.Hash)
 						if err == nil {
 							diff.Files[i].OldContent = blob
@@ -264,7 +264,7 @@ func (r *Repository) DiffIndex() (*Diff, error) {
 					}
 				}
 				for _, e := range headTree.Entries {
-					if e.Name == f.Name && matchOS(e.OS, cOS) {
+					if e.Name == f.Name && osMatch(e.OSS, cOS) {
 						blob, err := r.LoadFileContent(e.Hash)
 						if err == nil {
 							diff.Files[i].OldContent = blob
@@ -290,7 +290,7 @@ func (r *Repository) commitTree(hash core.Hash) (map[string]TreeEntry, error) {
 	}
 	entries := make(map[string]TreeEntry, len(tree.Entries))
 	for _, e := range tree.Entries {
-		entries[entryKey(e.Name, e.OS)] = e
+		entries[entryKey(e.Name, osIDForKey(e.OSS))] = e
 	}
 	return entries, nil
 }

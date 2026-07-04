@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/zhsoft88/lo/internal/core"
 )
@@ -57,6 +58,74 @@ func (r *Repository) LoadObject(hash core.Hash) (core.ObjectType, []byte, error)
 func (r *Repository) HasObject(hash core.Hash) bool {
 	_, err := os.Stat(r.objectPath(hash))
 	return err == nil
+}
+
+// FindObjectByPrefix resolves a short hex prefix to a full object hash.
+// The prefix must be at least 2 characters. It first tries the git-style
+// XX/YYYYYY lookup (prefix[:2] as directory), then falls back to scanning
+// all object directories for the full prefix.
+// Returns an error if no match or multiple matches are found.
+func (r *Repository) FindObjectByPrefix(prefix string) (core.Hash, error) {
+	if len(prefix) < 2 {
+		return core.Hash{}, fmt.Errorf("hash prefix too short: %q", prefix)
+	}
+	if len(prefix) > core.HashSize*2 {
+		return core.Hash{}, fmt.Errorf("hash prefix too long: %q", prefix)
+	}
+
+	// Try standard XX/YYYYYY lookup first
+	if h, err := r.findObjectByDirPrefix(prefix); err == nil {
+		return h, nil
+	}
+
+	// Fallback: scan all object directories
+	objectsDir := r.ObjectsDir()
+	dirs, err := ioutil.ReadDir(objectsDir)
+	if err != nil {
+		return core.Hash{}, fmt.Errorf("object not found: %s", prefix)
+	}
+	var match string
+	for _, dir := range dirs {
+		if !dir.IsDir() || len(dir.Name()) != 2 {
+			continue
+		}
+		fullPrefix := dir.Name() + prefix
+		if h, err := r.findObjectByDirPrefix(fullPrefix); err == nil {
+			s := h.String()
+			if match != "" {
+				return core.Hash{}, fmt.Errorf("ambiguous hash prefix: %s", prefix)
+			}
+			match = s
+		}
+	}
+	if match == "" {
+		return core.Hash{}, fmt.Errorf("object not found: %s", prefix)
+	}
+	return core.HashFromHex(match)
+}
+
+// findObjectByDirPrefix resolves prefix using standard XX/YYYYYY layout.
+func (r *Repository) findObjectByDirPrefix(prefix string) (core.Hash, error) {
+	dir := filepath.Join(r.ObjectsDir(), prefix[:2])
+	entries, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return core.Hash{}, err
+	}
+	suffix := prefix[2:]
+	var match string
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, suffix) {
+			if match != "" {
+				return core.Hash{}, fmt.Errorf("ambiguous hash prefix: %s", prefix)
+			}
+			match = prefix[:2] + name
+		}
+	}
+	if match == "" {
+		return core.Hash{}, fmt.Errorf("no match in %s", prefix[:2])
+	}
+	return core.HashFromHex(match)
 }
 
 // objectPath returns the filesystem path for an object hash.

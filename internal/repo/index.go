@@ -33,7 +33,7 @@ type IndexEntry struct {
 	Size        int64     `json:"size"`
 	Mode        uint32    `json:"mode"`
 	Lazy        bool      `json:"lazy,omitempty"` // true if chunks not yet fetched (lfs placeholder)
-	OS          uint8     `json:"os,omitempty"`   // target OS ID; 0 = all OSes
+	OSS []uint8 `json:"oss,omitempty"`     // list of OS IDs the entry applies to; empty = all OSes
 }
 
 // Index is the staging area, mapping repo-relative paths to entries.
@@ -82,7 +82,7 @@ func (r *Repository) SaveIndex(idx *Index) error {
 // AddFile reads a file from disk, stores it as an object, and adds it to the index
 // as a default (all-OS) entry.
 func (r *Repository) AddFile(filePath string) error {
-	return r.addFileInternal(filePath, 0)
+	return r.addFileInternal(filePath, 0, nil)
 }
 
 // AddFileOS reads a file from disk, stores it as an object, and adds it to the
@@ -92,11 +92,44 @@ func (r *Repository) AddFileOS(filePath, osTag string) error {
 	if osTag != "" && id == 0 {
 		return fmt.Errorf("unknown OS: %s", osTag)
 	}
-	return r.addFileInternal(filePath, id)
+	return r.addFileInternal(filePath, id, []uint8{id})
 }
 
-// addFileInternal is the shared implementation for AddFile and AddFileOS.
-func (r *Repository) addFileInternal(filePath string, osID uint8) error {
+// AddFileOSMatch adds a file with an OS expression. The expression is resolved
+// to a list of OS IDs stored in the entry's OSS field. Single-OS expressions use
+// that OS ID as the key discriminator; complex expressions use key 0.
+func (r *Repository) AddFileOSMatch(filePath, expr string) error {
+	if expr == "" || expr == "*" {
+		return r.addFileInternal(filePath, 0, nil)
+	}
+	include, exclude, err := ParseOSExpr(expr)
+	if err != nil {
+		return fmt.Errorf("invalid OS expression: %w", err)
+	}
+	var oss []uint8
+	var osID uint8
+	if len(include) > 0 && len(exclude) == 0 {
+		// Simple include list
+		for id := range include {
+			oss = append(oss, id)
+		}
+		if len(oss) == 1 {
+			osID = oss[0]
+		}
+	} else if len(exclude) > 0 {
+		// Exclude list — oss = all known OSes except excluded
+		for _, name := range KnownOSes {
+			id := OSID(name)
+			if !exclude[id] {
+				oss = append(oss, id)
+			}
+		}
+	}
+	return r.addFileInternal(filePath, osID, oss)
+}
+
+// addFileInternal is the shared implementation for AddFile, AddFileOS, and AddFileOSMatch.
+func (r *Repository) addFileInternal(filePath string, osID uint8, oss []uint8) error {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
@@ -174,7 +207,7 @@ func (r *Repository) addFileInternal(filePath string, osID uint8) error {
 		ContentHash: contentHash,
 		Size:        fi.Size(),
 		Mode:        mode,
-		OS:          osID,
+		OSS:         oss,
 	}
 
 	return r.SaveIndex(idx)
@@ -219,8 +252,8 @@ func (r *Repository) RemoveFile(filePath string) error {
 	// Find which variant is visible on the current OS and remove only that one
 	cOS := currentOS()
 	var keyToDelete string
-	for key := range idx.Entries {
-		if path, os := parseKey(key); path == relFormatted && matchOS(os, cOS) {
+	for key, entry := range idx.Entries {
+		if path, os := parseKey(key); path == relFormatted && osMatch(entry.OSS, cOS) {
 			if keyToDelete == "" || os != 0 {
 				// Prefer OS-specific match over default (same logic as visibleEntries)
 				keyToDelete = key

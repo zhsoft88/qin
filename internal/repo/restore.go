@@ -100,9 +100,9 @@ func (r *Repository) RestoreStaged(filePath string) error {
 	cOS := currentOS()
 	var headEntry *TreeEntry
 	for _, e := range tree.Entries {
-		if e.Name == relFormatted && matchOS(e.OS, cOS) {
+		if e.Name == relFormatted && osMatch(e.OSS, cOS) {
 			headEntry = &e
-			if e.OS != 0 && e.OS == cOS {
+			if len(e.OSS) == 1 && e.OSS[0] == cOS {
 				break
 			}
 		}
@@ -123,13 +123,13 @@ func (r *Repository) RestoreStaged(filePath string) error {
 		contentHash = core.HashFromBytes(bd)
 	}
 
-	key := entryKey(relFormatted, headEntry.OS)
+	key := entryKey(relFormatted, osIDForKey(headEntry.OSS))
 	idx.Entries[key] = IndexEntry{
 		Hash:        headEntry.Hash,
 		ContentHash: contentHash,
 		Size:        headEntry.Size,
 		Mode:        headEntry.Mode,
-		OS:          headEntry.OS,
+		OSS:         headEntry.OSS,
 	}
 
 	return r.SaveIndex(idx)

@@ -69,9 +69,9 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 		// Determine the winning entry for the current OS
 		var winner *TreeEntry
 		for _, e := range group.entries {
-			if matchOS(e.OS, cOS) {
+			if osMatch(e.OSS, cOS) {
 				winner = &e
-				if e.OS != 0 && e.OS == cOS {
+				if len(e.OSS) == 1 && e.OSS[0] == cOS {
 					break // exact OS match is the best possible
 				}
 			}
@@ -79,12 +79,12 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 		if winner == nil {
 			// No matching OS variant — still add to index, skip working tree
 			for _, e := range group.entries {
-				key := entryKey(name, e.OS)
+				key := entryKey(name, osIDForKey(e.OSS))
 				newIndex.Entries[key] = IndexEntry{
 					Hash: e.Hash,
 					Size: e.Size,
 					Mode: e.Mode,
-					OS:   e.OS,
+					OSS:    e.OSS,
 				}
 			}
 			continue
@@ -99,12 +99,12 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 				return fmt.Errorf("create submodule dir %s: %w", name, err)
 			}
 			for _, e := range group.entries {
-				key := entryKey(name, e.OS)
+				key := entryKey(name, osIDForKey(e.OSS))
 				newIndex.Entries[key] = IndexEntry{
 					Hash: e.Hash,
 					Size: e.Size,
 					Mode: e.Mode,
-					OS:   e.OS,
+					OSS:    e.OSS,
 				}
 			}
 			continue
@@ -145,7 +145,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 
 		// Add all OS variants to index (default + OS-specific)
 		for _, e := range group.entries {
-			key := entryKey(name, e.OS)
+			key := entryKey(name, osIDForKey(e.OSS))
 			var contentHash core.Hash
 			if e.Hash == winner.Hash {
 				contentHash = core.HashFromBytes(fileData)
@@ -161,7 +161,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 				Size:        e.Size,
 				Mode:        e.Mode,
 				Lazy:        e.Hash == winner.Hash && isLazy,
-				OS:          e.OS,
+				OSS:         e.OSS,
 			}
 		}
 	}

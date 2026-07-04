@@ -1,7 +1,9 @@
 package repo
 
 import (
+	"fmt"
 	"runtime"
+	"strings"
 )
 
 // KnownOSes is the list of recognized operating system short identifiers.
@@ -108,29 +110,61 @@ func ParseKey(key string) (path string, osID uint8) {
 	return parseKey(key)
 }
 
-// matchOS returns true if the given entryOS should be visible on the current OS.
-// 0 (default) always matches. Non-zero only matches when equal.
-func matchOS(entryOS, currentOS uint8) bool {
-	if entryOS == 0 {
+// osMatch returns true if queryOS is in oss (empty oss matches all).
+func osMatch(oss []uint8, queryOS uint8) bool {
+	if len(oss) == 0 {
 		return true
 	}
-	return entryOS == currentOS
+	for _, id := range oss {
+		if id == queryOS {
+			return true
+		}
+	}
+	return false
 }
+
+// isOSSpecific returns true if oss has at least one OS ID (not a default entry).
+func isOSSpecific(oss []uint8) bool {
+	return len(oss) > 0
+}
+
+// osIDForKey returns the OS ID to use as the key discriminator.
+// If oss has a single OS, that OS ID is used; otherwise returns 0.
+func osIDForKey(oss []uint8) uint8 {
+	if len(oss) == 1 {
+		return oss[0]
+	}
+	return 0
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // visibleEntries filters the full index map to only entries that should be
 // visible on the given OS. Returns a map keyed by clean path (no OS suffix).
 // For each base path: if an OS-specific match exists it wins; otherwise default.
+// Uses each entry's OSS field for OS match.
 func visibleEntries(entries map[string]IndexEntry, currentOS uint8) map[string]IndexEntry {
 	result := make(map[string]IndexEntry)
 
 	for key, entry := range entries {
-		path, os := parseKey(key)
-		if !matchOS(os, currentOS) {
+		path, _ := parseKey(key)
+		if !osMatch(entry.OSS, currentOS) {
 			continue
 		}
-		// OS-specific match overrides default for the same path
+		// OS-specific entry overrides default for the same path
 		if existing, ok := result[path]; ok {
-			if existing.OS == 0 && os != 0 {
+			if !isOSSpecific(existing.OSS) && isOSSpecific(entry.OSS) {
 				result[path] = entry
 			}
 			continue
@@ -139,6 +173,11 @@ func visibleEntries(entries map[string]IndexEntry, currentOS uint8) map[string]I
 	}
 
 	return result
+}
+
+// VisibleFiles filters index entries to show only those visible on the given OS.
+func VisibleFiles(entries map[string]IndexEntry, osID uint8) map[string]IndexEntry {
+	return visibleEntries(entries, osID)
 }
 
 // collectPaths extracts deduplicated clean paths from a map of composite keys.
@@ -166,6 +205,102 @@ func CurrentOSID() uint8 {
 // currentOS returns the numeric OS ID for the current runtime OS.
 func currentOS() uint8 {
 	return CurrentOSID()
+}
+
+// ParseOSExpr parses a comma-separated OS expression into include/exclude sets.
+//
+// Syntax:
+//
+//	""           — empty (caller should use CurrentOSID as default)
+//	"*"          — match any OS (include=nil, exclude=nil)
+//	"win"        — match only windows
+//	"!win"       — match everything except windows
+//	"!win,!mac"  — match everything except windows and mac
+//	"win,linux"  — match windows OR linux
+//
+// An empty expression returns (nil, nil, nil).
+// Unknown OS names return an error.
+func ParseOSExpr(s string) (include, exclude map[uint8]bool, err error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil, nil
+	}
+	parts := strings.Split(s, ",")
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if part == "*" {
+			// * means match all — reset both sets
+			return nil, nil, nil
+		}
+		if strings.HasPrefix(part, "!") {
+			name := strings.TrimPrefix(part, "!")
+			name = strings.TrimSpace(name)
+			if !IsKnownOS(name) {
+				return nil, nil, fmt.Errorf("unknown OS: %q", name)
+			}
+			if exclude == nil {
+				exclude = make(map[uint8]bool)
+			}
+			exclude[OSID(name)] = true
+		} else {
+			if !IsKnownOS(part) {
+				return nil, nil, fmt.Errorf("unknown OS: %q", part)
+			}
+			if include == nil {
+				include = make(map[uint8]bool)
+			}
+			include[OSID(part)] = true
+		}
+	}
+	return include, exclude, nil
+}
+
+
+
+// VisibleEntriesExpr filters the full index map using an include/exclude expression.
+// For each base path: if an OS-specific match exists it wins; otherwise default.
+// An empty expression (both nil) returns entries visible on the current OS.
+func VisibleEntriesExpr(entries map[string]IndexEntry, include, exclude map[uint8]bool) map[string]IndexEntry {
+	result := make(map[string]IndexEntry)
+
+	for key, entry := range entries {
+		path, os := parseKey(key)
+		if !MatchOSExpr(os, include, exclude) {
+			continue
+		}
+		// OS-specific match overrides default for the same path
+		if existing, ok := result[path]; ok {
+			if !isOSSpecific(existing.OSS) && isOSSpecific(entry.OSS) {
+				result[path] = entry
+			}
+			continue
+		}
+		result[path] = entry
+	}
+
+	return result
+}
+
+// MatchOSExpr checks whether a given entry OS ID matches the include/exclude filter.
+// entryOS is the key discriminator OS ID (0 = default entry, matches all filters).
+// When both include and exclude are nil, all entries match.
+func MatchOSExpr(entryOS uint8, include, exclude map[uint8]bool) bool {
+	if include == nil && exclude == nil {
+		return true
+	}
+	if entryOS == 0 {
+		return true
+	}
+	if exclude[entryOS] {
+		return false
+	}
+	if len(include) > 0 && !include[entryOS] {
+		return false
+	}
+	return true
 }
 
 // OSNameOrStar returns the display name for an OS ID.

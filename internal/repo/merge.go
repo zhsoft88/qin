@@ -295,6 +295,7 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 				Hash: entry.Hash,
 				Size: 0,
 				Mode: entry.Mode,
+				OSS:    entry.OSS,
 			}
 			continue
 		}
@@ -403,7 +404,7 @@ func (r *Repository) commitTreeMap(hash core.Hash) (map[string]TreeEntry, error)
 	}
 	entries := make(map[string]TreeEntry, len(tree.Entries))
 	for _, e := range tree.Entries {
-		entries[entryKey(e.Name, e.OS)] = e
+		entries[entryKey(e.Name, osIDForKey(e.OSS))] = e
 	}
 	return entries, nil
 }
@@ -411,16 +412,16 @@ func (r *Repository) commitTreeMap(hash core.Hash) (map[string]TreeEntry, error)
 func (r *Repository) buildTreeFromEntries(entries map[string]TreeEntry) (core.Hash, error) {
 	entryList := make([]TreeEntry, 0, len(entries))
 	for key, entry := range entries {
-		path, os := parseKey(key)
+		path, _ := parseKey(key)
 		entry.Name = path
-		entry.OS = os
+		// OSS carries OS info; no single OS field on TreeEntry
 		entryList = append(entryList, entry)
 	}
 	sort.Slice(entryList, func(i, j int) bool {
 		if entryList[i].Name != entryList[j].Name {
 			return entryList[i].Name < entryList[j].Name
 		}
-		return entryList[i].OS < entryList[j].OS
+		return osIDForKey(entryList[i].OSS) < osIDForKey(entryList[j].OSS)
 	})
 	tree := &Tree{Entries: entryList}
 	content, err := core.SerializeJSON(tree)

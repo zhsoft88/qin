@@ -160,7 +160,7 @@ func (r *Repository) applyCommitChanges(parentTree, commitTree map[string]TreeEn
 	for key := range allKeys {
 		newEntry, inNew := commitTree[key]
 		oldEntry, inOld := parentTree[key]
-		cleanPath, osTag := parseKey(key)
+		cleanPath, _ := parseKey(key)
 
 		switch {
 		case !inNew:
@@ -207,7 +207,7 @@ func (r *Repository) applyCommitChanges(parentTree, commitTree map[string]TreeEn
 				ContentHash: contentHash,
 				Size:        newEntry.Size,
 				Mode:        newEntry.Mode,
-				OS:          osTag,
+				OSS:         newEntry.OSS,
 			}
 
 		default:

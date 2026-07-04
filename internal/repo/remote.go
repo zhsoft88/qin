@@ -207,6 +207,7 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 		Size:        entry.Size,
 		Mode:        entry.Mode,
 		Lazy:        false,
+		OSS:         entry.OSS,
 	}
 	return r.SaveIndex(idx)
 }

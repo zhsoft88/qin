@@ -47,7 +47,7 @@ func (r *Repository) ResetCommit(hash core.Hash, mode string) error {
 	// Build new entries from tree
 	newEntries := make(map[string]TreeEntry)
 	for _, e := range tree.Entries {
-		key := entryKey(e.Name, e.OS)
+		key := entryKey(e.Name, osIDForKey(e.OSS))
 		newEntries[key] = e
 	}
 
@@ -74,9 +74,9 @@ func (r *Repository) ResetCommit(hash core.Hash, mode string) error {
 		for name, group := range groups {
 			var winner *TreeEntry
 			for _, e := range group {
-				if matchOS(e.OS, cOS) {
+				if osMatch(e.OSS, cOS) {
 					winner = &e
-					if e.OS != 0 && e.OS == cOS {
+					if len(e.OSS) == 1 && e.OSS[0] == cOS {
 						break
 					}
 				}
@@ -111,7 +111,7 @@ func (r *Repository) buildIndexFromTreeEntries(entries map[string]TreeEntry) err
 			ContentHash: contentHash,
 			Size:        e.Size,
 			Mode:        e.Mode,
-			OS:          e.OS,
+			OSS:              e.OSS,
 		}
 	}
 	return r.SaveIndex(newIndex)

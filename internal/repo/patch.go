@@ -192,7 +192,6 @@ func (r *Repository) ApplyPatch(data []byte) error {
 				ContentHash: contentHash,
 				Size:        size,
 				Mode:        0644,
-				OS:          osID,
 			}
 
 		case '-':
@@ -213,8 +212,8 @@ func (r *Repository) ApplyPatch(data []byte) error {
 			delete(idx.Entries, key)
 			// Also try the visible entry
 			if entry, ok := visible[cleanPath]; ok {
-				for k, e := range idx.Entries {
-					if path, _ := parseKey(k); path == cleanPath && e.OS == entry.OS {
+				for k := range idx.Entries {
+					if p, o := parseKey(k); p == cleanPath && o == osIDForKey(entry.OSS) {
 						delete(idx.Entries, k)
 						break
 					}

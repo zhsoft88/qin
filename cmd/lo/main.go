@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 	"github.com/zhsoft88/lo/internal/core"
 	"github.com/zhsoft88/lo/internal/repo"
@@ -48,10 +49,9 @@ func main() {
 		"fetch":    {"fetch", "Fetch from remote", runFetch},
 		"pull":     {"pull", "Pull from remote and merge", runPull},
 		"clone":     {"clone", "Clone a repository [--lazy]", runClone},
-		"lfs-status": {"lfs-status", "Show large file status", runLfsStatus},
-		"lfs-pull":   {"lfs-pull", "Pull large file chunks [--all|<file>]", runLfsPull},
+		"lfs":       {"lfs", "Manage large files (status, pull)", runLfs},
 		"serve":      {"serve", "Start HTTP server for remote access [--addr] [--base-path]", runServe},
-		"show":      {"show", "Show file content for an OS variant [--os <os>]", runShow},
+		"show":      {"show", "Show file content for the given OS [--os <os>]", runShow},
 		"config":    {"config", "Get or set configuration values [--unset]", runConfig},
 		"reset":     {"reset", "Reset HEAD [--soft | --mixed | --hard] [<commit>]", runReset},
 		"restore":   {"restore", "Restore working tree or index files", runRestore},
@@ -76,7 +76,7 @@ func usage() {
 	fmt.Println(`Usage: lo <command> [options]
 Commands:
   init              Initialize a new repository
-  add <file>        Stage file(s) [--os to tag with current OS]
+  add <file>        Stage file(s) [--os (current OS) | --os-match <expr>]
   rm <file>         Remove staged file(s)
   commit            Create a commit from staged files
   log [--graph]     Show commit history (--graph for branch visualization)
@@ -97,10 +97,10 @@ Commands:
   fetch [<remote>]   Fetch from remote (default: origin)
   pull [<remote>]    Pull from remote and merge (default: origin)
   clone [--lazy] [--recursive] <url> <dir>  Clone a repository
-  lfs-status         Show large file status (placeholder vs. available)
-  lfs-pull [--all|<file>]  Pull large file chunks on demand
+  lfs status         Show large file status (placeholder vs. available)
+  lfs pull [<file>]   Pull large file chunks on demand (--all for all)
   serve [--addr <addr>] [--base-path <path>]  Start HTTP server (default :8080; --base-path for multi-repo)
-  show <file> [--os <os>]  Show file content for an OS variant (omit --os to list all)
+  show [--os <os>] <file>  Show file content (defaults to current OS if --os omitted)
   config [<key> [<value>]]  Get or set configuration values
   reset [--soft|--mixed|--hard] [<commit>]  Reset HEAD/index/working tree
   restore [--staged] <file>...       Restore working tree or index files
@@ -110,7 +110,9 @@ Commands:
   submodule status              Show submodule status
   lost-found                    List dangling (unreachable) commits
   version                       Show version information
-  gc                            Prune dangling objects to reclaim space`)
+  gc                            Prune dangling objects to reclaim space
+
+OS identifiers: win, mac, linux, freebsd, netbsd, openbsd, dragonfly, solaris, android`)
 }
 // ---- init ----
 func runInit(args []string) error {
@@ -128,41 +130,58 @@ func runInit(args []string) error {
 func runAdd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	osFlag := fs.Bool("os", false, "tag file(s) with current OS")
+	osMatchFlag := fs.String("os-match", "", "tag file(s) with OS expression (e.g., win, !win, win,linux)")
 	fs.Parse(args)
 	if fs.NArg() == 0 {
-		return fmt.Errorf("usage: lo add [--os] <file> [file...]")
+		return fmt.Errorf("usage: lo add [--os] [--os-match <expr>] <file> [file...]")
 	}
 	r, err := findRepo()
 	if err != nil {
 		return err
 	}
+	// --os-match takes priority over --os
+	useOSExpr := *osMatchFlag
+	if useOSExpr == "" && *osFlag {
+		useOSExpr = repo.OSName(repo.CurrentOSID())
+	}
+	if useOSExpr != "" && useOSExpr != "*" {
+		inc, exc, err := repo.ParseOSExpr(useOSExpr)
+		if err != nil {
+			return err
+		}
+		cOS := repo.CurrentOSID()
+		if exc[cOS] || (len(inc) > 0 && !inc[cOS]) {
+			return fmt.Errorf("--os-match %q excludes current OS (%s)", useOSExpr, repo.OSName(cOS))
+		}
+	}
 	for _, f := range fs.Args() {
-		osTag := ""
-		if *osFlag {
-			osTag = repo.OSName(repo.CurrentOSID())
+		if useOSExpr != "" {
+			if err := addFileOrDirExpr(r, f, useOSExpr); err != nil {
+				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
+				continue
+			}
+			displayOS := useOSExpr
+			if useOSExpr == repo.OSName(repo.CurrentOSID()) && *osFlag {
+				displayOS = repo.OSName(repo.CurrentOSID())
+			}
+			fmt.Printf("  added: %s [%s]\n", f, displayOS)
+		} else {
+			if err := addFileOrDir(r, f); err != nil {
+				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
+				continue
+			}
+			fmt.Printf("  added: %s [*]\n", f)
 		}
-		if err := addFileOrDir(r, f, osTag); err != nil {
-			fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
-			continue
-		}
-		displayOS := "*"
-		if osTag != "" {
-			displayOS = osTag
-		}
-		fmt.Printf("  added: %s [%s]\n", f, displayOS)
 	}
 	return nil
 }
-// addFileOrDir adds a file or directory recursively with the given OS tag.
-func addFileOrDir(r *repo.Repository, path, osTag string) error {
+// addFileOrDir adds a file or directory recursively (default OS).
+func addFileOrDir(r *repo.Repository, path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	if !fi.IsDir() {
-		if osTag != "" {
-			return r.AddFileOS(path, osTag)
-		}
 		return r.AddFile(path)
 	}
 	entries, err := ioutil.ReadDir(path)
@@ -171,7 +190,28 @@ func addFileOrDir(r *repo.Repository, path, osTag string) error {
 	}
 	for _, entry := range entries {
 		childPath := filepath.Join(path, entry.Name())
-		if err := addFileOrDir(r, childPath, osTag); err != nil {
+		if err := addFileOrDir(r, childPath); err != nil {
+			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
+		}
+	}
+	return nil
+}
+// addFileOrDirExpr adds a file or directory recursively with an OS expression.
+func addFileOrDirExpr(r *repo.Repository, path, expr string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return r.AddFileOSMatch(path, expr)
+	}
+	entries, err := ioutil.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		childPath := filepath.Join(path, entry.Name())
+		if err := addFileOrDirExpr(r, childPath, expr); err != nil {
 			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
 		}
 	}
@@ -294,6 +334,7 @@ func runStatus(args []string) error {
 	if err != nil {
 		return err
 	}
+
 	s, err := r.WorkTreeStatus()
 	if err != nil {
 		return err
@@ -315,8 +356,12 @@ func runStatus(args []string) error {
 		for _, p := range paths {
 			entry := s.Staged[p]
 			osTag := ""
-			if entry.OS != 0 {
-				osTag = " [" + repo.OSNameOrStar(entry.OS) + "]"
+			if len(entry.OSS) > 0 {
+				names := make([]string, len(entry.OSS))
+				for i, id := range entry.OSS {
+					names[i] = repo.OSName(id)
+				}
+				osTag = " [" + strings.Join(names, ",") + "]"
 			} else {
 				osTag = " [*]"
 			}
@@ -355,7 +400,12 @@ func runCat(args []string) error {
 	if err != nil {
 		return err
 	}
-	h, err := core.HashFromHex(args[0])
+	var h core.Hash
+	if len(args[0]) == core.HashSize*2 {
+		h, err = core.HashFromHex(args[0])
+	} else {
+		h, err = r.FindObjectByPrefix(args[0])
+	}
 	if err != nil {
 		return err
 	}
@@ -370,9 +420,6 @@ func runCat(args []string) error {
 }
 // ---- ls ----
 func runLs(args []string) error {
-	fs := flag.NewFlagSet("ls", flag.ExitOnError)
-	osFilter := fs.String("os", "", "filter by OS tag (e.g., win, linux, mac; * for all-OS only)")
-	fs.Parse(args)
 	r, err := findRepo()
 	if err != nil {
 		return err
@@ -385,43 +432,26 @@ func runLs(args []string) error {
 		fmt.Println("nothing staged")
 		return nil
 	}
+
+	visible := repo.VisibleFiles(files, repo.CurrentOSID())
 	type displayEntry struct {
 		path string
-		os   uint8
 		hash string
 		size int64
 	}
 	var entries []displayEntry
-	var filterID uint8
-	if *osFilter != "" && *osFilter != "*" {
-		filterID = repo.OSID(*osFilter)
-	}
-	for key, entry := range files {
-		path, os := repo.ParseKey(key)
-		if *osFilter != "" {
-			if *osFilter == "*" && os != 0 {
-				continue
-			}
-			if *osFilter != "*" && os != filterID {
-				continue
-			}
-		}
+	for path, entry := range visible {
 		entries = append(entries, displayEntry{
 			path: path,
-			os:   os,
 			hash: entry.Hash.Short(),
 			size: entry.Size,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].path != entries[j].path {
-			return entries[i].path < entries[j].path
-		}
-		return entries[i].os < entries[j].os
+		return entries[i].path < entries[j].path
 	})
 	for _, e := range entries {
-			displayOS := repo.OSNameOrStar(e.os)
-		fmt.Printf("%s  %s  %s [%s]\n", e.hash, humanSize(e.size), e.path, displayOS)
+		fmt.Printf("%s  %s  %s\n", e.hash, humanSize(e.size), e.path)
 	}
 	return nil
 }
@@ -848,7 +878,21 @@ func runClone(args []string) error {
 	fmt.Printf("cloned into %s\n", r.Path)
 	return nil
 }
-// ---- lfs-status ----
+// ---- lfs ----
+func runLfs(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: lo lfs status|pull [<file>]")
+	}
+	switch args[0] {
+	case "status":
+		return runLfsStatus(args[1:])
+	case "pull":
+		return runLfsPull(args[1:])
+	default:
+		return fmt.Errorf("unknown lfs subcommand: %s (use status, pull)", args[0])
+	}
+}
+
 func runLfsStatus(args []string) error {
 	r, err := findRepo()
 	if err != nil {
@@ -878,10 +922,11 @@ func runLfsStatus(args []string) error {
 	}
 	return nil
 }
-// ---- lfs-pull ----
+
+// ---- lfs pull ----
 func runLfsPull(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo lfs-pull [--all | <file>]")
+		return fmt.Errorf("usage: lo lfs pull [--all | <file>]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -925,20 +970,29 @@ func runLfsPull(args []string) error {
 }
 // ---- show ----
 func runShow(args []string) error {
-	// Manual flag parsing to support --os after the file path
-	osTag := ""
+	if len(args) == 0 {
+		return fmt.Errorf("usage: lo show [--os <os>] <file>")
+	}
+	osName := ""
 	filePath := ""
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--os" && i+1 < len(args) {
-			osTag = args[i+1]
+			osName = args[i+1]
 			i++
 		} else if filePath == "" {
 			filePath = args[i]
 		}
 	}
 	if filePath == "" {
-		return fmt.Errorf("usage: lo show <file> [--os <os>]")
+		return fmt.Errorf("usage: lo show [--os <os>] <file>")
 	}
+
+	// Default to current OS
+	if osName == "" {
+		osName = repo.OSName(repo.CurrentOSID())
+	}
+	osID := repo.OSID(osName)
+
 	r, err := findRepo()
 	if err != nil {
 		return err
@@ -952,49 +1006,28 @@ func runShow(args []string) error {
 		return fmt.Errorf("path outside repository: %w", err)
 	}
 	relFormatted := filepath.ToSlash(relPath)
+
 	idx, err := r.LoadIndex()
 	if err != nil {
 		return err
 	}
-	if osTag == "" {
-		// List all variants of the file
-		type variant struct {
-			os   uint8
-			hash string
-			size int64
-		}
-		var variants []variant
-		for key, entry := range idx.Entries {
-			if path, os := repo.ParseKey(key); path == relFormatted {
-				variants = append(variants, variant{
-					os: os, hash: entry.Hash.Short(), size: entry.Size,
-				})
-			}
-		}
-		if len(variants) == 0 {
-			return fmt.Errorf("file not found: %s", filePath)
-		}
-		sort.Slice(variants, func(i, j int) bool {
-			return variants[i].os < variants[j].os
-		})
-		fmt.Printf("%s variants:\n", filePath)
-		for _, v := range variants {
-				displayOS := repo.OSNameOrStar(v.os)
-			fmt.Printf("  [%s]  %s  %s bytes\n", displayOS, v.hash, humanSize(v.size))
-		}
-		return nil
-	}
-	// Show specific OS variant content
-	key := repo.EntryKey(relFormatted, repo.OSID(osTag))
+
+	// Try OS-specific key first, fall back to default
+	key := repo.EntryKey(relFormatted, osID)
 	entry, ok := idx.Entries[key]
-	if !ok {
-		return fmt.Errorf("file '%s' not found for OS '%s'", filePath, osTag)
+	if !ok && osID != 0 {
+		key = relFormatted
+		entry, ok = idx.Entries[key]
 	}
+	if !ok {
+		return fmt.Errorf("file '%s' not found for OS '%s'", filePath, osName)
+	}
+
 	objType, content, err := r.LoadObject(entry.Hash)
 	if err != nil {
 		return fmt.Errorf("load object: %w", err)
 	}
-	fmt.Printf("type: %s  size: %d bytes  hash: %s\n\n", objType, len(content), entry.Hash.Short())
+	fmt.Printf("type: %s  size: %d bytes  hash: %s  os: %s\n\n", objType, len(content), entry.Hash.Short(), osName)
 	os.Stdout.Write(content)
 	if len(content) > 0 && content[len(content)-1] != '\n' {
 		fmt.Println()

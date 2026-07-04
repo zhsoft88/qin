@@ -20,7 +20,14 @@ type Status struct {
 }
 
 // WorkTreeStatus scans the working directory and compares against the index.
+// Entries are filtered by the current runtime OS.
 func (r *Repository) WorkTreeStatus() (*Status, error) {
+	return r.WorkTreeStatusFiltered(nil, nil)
+}
+
+// WorkTreeStatusFiltered is like WorkTreeStatus but allows custom OS filtering.
+// When include and exclude are both nil, the current OS is used as the filter.
+func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool) (*Status, error) {
 	idx, err := r.LoadIndex()
 	if err != nil {
 		return nil, err
@@ -30,8 +37,12 @@ func (r *Repository) WorkTreeStatus() (*Status, error) {
 		Branch: r.CurrentBranch(),
 	}
 
-	// Only show entries matching the current OS in status
-	visible := visibleEntries(idx.Entries, currentOS())
+	var visible map[string]IndexEntry
+	if include == nil && exclude == nil {
+		visible = visibleEntries(idx.Entries, currentOS())
+	} else {
+		visible = VisibleEntriesExpr(idx.Entries, include, exclude)
+	}
 	s.Staged = visible
 
 	headHash, err := r.ResolveHEAD()
@@ -41,7 +52,8 @@ func (r *Repository) WorkTreeStatus() (*Status, error) {
 
 	// Track all base paths (including non-visible OS variants) for directory tracking
 	tracked := make(map[string]bool)
-	for path := range visible {
+	for key := range idx.Entries {
+		path, _ := parseKey(key)
 		tracked[path] = true
 	}
 
