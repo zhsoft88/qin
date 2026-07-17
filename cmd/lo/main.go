@@ -192,7 +192,15 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string) error {
 		if err := r.AddFile(path); err != nil {
 			return err
 		}
-		fmt.Printf("  added: %s [*]\n", relPath(r, path))
+		display := relPath(r, path)
+		if repo.TermWidth() > 0 {
+			max := repo.TermWidth() - 14
+			if len(display) > max && max > 10 {
+				half := (max - 3) // 2
+				display = display[:half] + "..." + display[len(display)-half:]
+			}
+		}
+		fmt.Printf("  added: %s [*]\n", display)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
@@ -227,7 +235,15 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string) 
 		if err := r.AddFileOSMatch(path, expr); err != nil {
 			return err
 		}
-		fmt.Printf("  added: %s [%s]\n", relPath(r, path), expr)
+		display := relPath(r, path)
+		if repo.TermWidth() > 0 {
+			max := repo.TermWidth() - 14 - len(expr)
+			if len(display) > max && max > 10 {
+				half := (max - 3) // 2
+				display = display[:half] + "..." + display[len(display)-half:]
+			}
+		}
+		fmt.Printf("  added: %s [%s]\n", display, expr)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {

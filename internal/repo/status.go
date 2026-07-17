@@ -143,7 +143,20 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 
 		checked++
 		phase = "scanning"
-		fmt.Fprintf(os.Stderr, "\r  %s: %d  %-*s", phase, checked, termWidth()-26, truncateName(name, termWidth()))
+		w := termWidth()
+		if w <= 0 {
+			w = 80
+		}
+		cd := 1
+		for n := checked; n >= 10; n /= 10 {
+			cd++
+		}
+		overhead := len(phase) + 5
+		maxName := w - overhead - cd
+		if maxName < 10 {
+			maxName = 10
+		}
+		fmt.Fprintf(os.Stderr, "\r  %s: %d  %-*s", phase, checked, maxName, truncateName(name, w))
 
 		if fi.IsDir() {
 			// Skip submodule directories — their content belongs to the submodule repo
