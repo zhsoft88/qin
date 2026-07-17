@@ -200,13 +200,17 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		(*added)++
 		display := relPath(r, path)
 		if repo.TermWidth() > 0 {
-			max := repo.TermWidth() - 14
+			cd := 1
+			for n := *added; n >= 10; n /= 10 { cd++ }
+			max := repo.TermWidth() - 12 - cd
 			if len(display) > max && max > 10 {
 				half := (max - 3) // 2
 				display = display[:half] + "..." + display[len(display)-half:]
 			}
+			fmt.Fprintf(os.Stderr, "  [%d] %-*s [*]   ", *added, max, display)
+		} else {
+			fmt.Fprintf(os.Stderr, "  [%d] %s [*]   ", *added, display)
 		}
-		fmt.Fprintf(os.Stderr, "  [%d] %s [*]   ", *added, display)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
@@ -244,13 +248,17 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		(*added)++
 		display := relPath(r, path)
 		if repo.TermWidth() > 0 {
-			max := repo.TermWidth() - 14 - len(expr)
+			cd := 1
+			for n := *added; n >= 10; n /= 10 { cd++ }
+			max := repo.TermWidth() - 12 - cd - len(expr)
 			if len(display) > max && max > 10 {
 				half := (max - 3) // 2
 				display = display[:half] + "..." + display[len(display)-half:]
 			}
+			fmt.Fprintf(os.Stderr, "  [%d] %-*s [%s]   ", *added, max, display, expr)
+		} else {
+			fmt.Fprintf(os.Stderr, "  [%d] %s [%s]   ", *added, display, expr)
 		}
-		fmt.Fprintf(os.Stderr, "  [%d] %s [%s]   ", *added, display, expr)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
