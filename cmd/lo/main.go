@@ -166,21 +166,26 @@ func runAdd(args []string) error {
 			return fmt.Errorf("--os-match %q excludes current OS (%s)", useOSExpr, repo.OSName(cOS))
 		}
 	}
+	added := 0
 	for _, f := range fs.Args() {
 		if useOSExpr != "" {
-			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags); err != nil {
+			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags, &added); err != nil {
 				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
 			}
 		} else {
-			if err := addFileOrDir(r, f, excludeFlags); err != nil {
+			if err := addFileOrDir(r, f, excludeFlags, &added); err != nil {
 				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
 			}
 		}
 	}
+	if added > 0 {
+		clearLine()
+		fmt.Printf("added %d file(s)\n", added)
+	}
 	return nil
 }
 // addFileOrDir adds a file or directory recursively (default OS).
-func addFileOrDir(r *repo.Repository, path string, excludes []string) error {
+func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -192,6 +197,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string) error {
 		if err := r.AddFile(path); err != nil {
 			return err
 		}
+		(*added)++
 		display := relPath(r, path)
 		if repo.TermWidth() > 0 {
 			max := repo.TermWidth() - 14
@@ -200,11 +206,11 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string) error {
 				display = display[:half] + "..." + display[len(display)-half:]
 			}
 		}
-		fmt.Printf("  added: %s [*]\n", display)
+		fmt.Fprintf(os.Stderr, "  [%d] %s [*]   ", *added, display)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
-		fmt.Fprintf(os.Stderr, "  skip %s: excluded\n", path)
+		fmt.Fprintf(os.Stderr, "  skip: %s   \n", path)
 		return nil
 	}
 	entries, err := ioutil.ReadDir(path)
@@ -216,14 +222,14 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string) error {
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
-		if err := addFileOrDir(r, childPath, excludes); err != nil {
+		if err := addFileOrDir(r, childPath, excludes, added); err != nil {
 			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
 		}
 	}
 	return nil
 }
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
-func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string) error {
+func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -235,6 +241,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string) 
 		if err := r.AddFileOSMatch(path, expr); err != nil {
 			return err
 		}
+		(*added)++
 		display := relPath(r, path)
 		if repo.TermWidth() > 0 {
 			max := repo.TermWidth() - 14 - len(expr)
@@ -243,11 +250,11 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string) 
 				display = display[:half] + "..." + display[len(display)-half:]
 			}
 		}
-		fmt.Printf("  added: %s [%s]\n", display, expr)
+		fmt.Fprintf(os.Stderr, "  [%d] %s [%s]   ", *added, display, expr)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
-		fmt.Fprintf(os.Stderr, "  skip %s: excluded\n", path)
+		fmt.Fprintf(os.Stderr, "  skip: %s   \n", path)
 		return nil
 	}
 	entries, err := ioutil.ReadDir(path)
@@ -259,7 +266,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string) 
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
-		if err := addFileOrDirExpr(r, childPath, expr, excludes); err != nil {
+		if err := addFileOrDirExpr(r, childPath, expr, excludes, added); err != nil {
 			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
 		}
 	}
@@ -369,6 +376,14 @@ func matchAnyPath(path string, patterns []string) bool {
 		}
 	}
 	return false
+}
+func clearLine() {
+	w := repo.TermWidth()
+	if w <= 0 {
+		fmt.Fprintf(os.Stderr, "                          ")
+		return
+	}
+	fmt.Fprintf(os.Stderr, "  %-*s", w-2, " ")
 }
 // ---- rm ----
 func runRm(args []string) error {
