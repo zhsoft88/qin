@@ -12,6 +12,15 @@ import (
 	"github.com/zhsoft88/lo/internal/core"
 	"github.com/zhsoft88/lo/internal/repo"
 )
+// stringSlice is a flag.Value that collects multiple values into a slice.
+type stringSlice []string
+
+func (s *stringSlice) String() string { return strings.Join(*s, ",") }
+func (s *stringSlice) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
 type command struct {
 	name    string
 	desc    string
@@ -76,7 +85,7 @@ func usage() {
 	fmt.Println(`Usage: lo <command> [options]
 Commands:
   init              Initialize a new repository
-  add <file>        Stage file(s) [--os (current OS) | --os-match <expr>]
+  add <file>        Stage file(s) [--os | --os-match <expr>] [--exclude <glob>]
   rm <file>         Remove staged file(s)
   commit            Create a commit from staged files
   log [--graph]     Show commit history (--graph for branch visualization)
@@ -131,9 +140,12 @@ func runAdd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	osFlag := fs.Bool("os", false, "tag file(s) with current OS")
 	osMatchFlag := fs.String("os-match", "", "tag file(s) with OS expression (e.g., win, !win, win,linux)")
+	var excludeFlags stringSlice
+	fs.Var(&excludeFlags, "exclude", "exclude files matching glob pattern (repeatable)")
+	args = reorderFlags(args)
 	fs.Parse(args)
 	if fs.NArg() == 0 {
-		return fmt.Errorf("usage: lo add [--os] [--os-match <expr>] <file> [file...]")
+		return fmt.Errorf("usage: lo add [--os] [--os-match <expr>] [--exclude <glob>] <file> [file...]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -156,66 +168,191 @@ func runAdd(args []string) error {
 	}
 	for _, f := range fs.Args() {
 		if useOSExpr != "" {
-			if err := addFileOrDirExpr(r, f, useOSExpr); err != nil {
+			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags); err != nil {
 				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
-				continue
 			}
-			displayOS := useOSExpr
-			if useOSExpr == repo.OSName(repo.CurrentOSID()) && *osFlag {
-				displayOS = repo.OSName(repo.CurrentOSID())
-			}
-			fmt.Printf("  added: %s [%s]\n", f, displayOS)
 		} else {
-			if err := addFileOrDir(r, f); err != nil {
+			if err := addFileOrDir(r, f, excludeFlags); err != nil {
 				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
-				continue
 			}
-			fmt.Printf("  added: %s [*]\n", f)
 		}
 	}
 	return nil
 }
 // addFileOrDir adds a file or directory recursively (default OS).
-func addFileOrDir(r *repo.Repository, path string) error {
+func addFileOrDir(r *repo.Repository, path string, excludes []string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	if !fi.IsDir() {
-		return r.AddFile(path)
+		if pathExcluded(r, path, excludes) {
+			return nil
+		}
+		if err := r.AddFile(path); err != nil {
+			return err
+		}
+		fmt.Printf("  added: %s [*]\n", relPath(r, path))
+		return nil
+	}
+	if dirExcluded(r, path, excludes) {
+		fmt.Fprintf(os.Stderr, "  skip %s: excluded\n", path)
+		return nil
 	}
 	entries, err := ioutil.ReadDir(path)
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
+		if entry.Name() == ".lo" || entry.Name() == ".loignore" {
+			continue
+		}
 		childPath := filepath.Join(path, entry.Name())
-		if err := addFileOrDir(r, childPath); err != nil {
+		if err := addFileOrDir(r, childPath, excludes); err != nil {
 			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
 		}
 	}
 	return nil
 }
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
-func addFileOrDirExpr(r *repo.Repository, path, expr string) error {
+func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	if !fi.IsDir() {
-		return r.AddFileOSMatch(path, expr)
+		if pathExcluded(r, path, excludes) {
+			return nil
+		}
+		if err := r.AddFileOSMatch(path, expr); err != nil {
+			return err
+		}
+		fmt.Printf("  added: %s [%s]\n", relPath(r, path), expr)
+		return nil
+	}
+	if dirExcluded(r, path, excludes) {
+		fmt.Fprintf(os.Stderr, "  skip %s: excluded\n", path)
+		return nil
 	}
 	entries, err := ioutil.ReadDir(path)
 	if err != nil {
 		return err
 	}
 	for _, entry := range entries {
+		if entry.Name() == ".lo" || entry.Name() == ".loignore" {
+			continue
+		}
 		childPath := filepath.Join(path, entry.Name())
-		if err := addFileOrDirExpr(r, childPath, expr); err != nil {
+		if err := addFileOrDirExpr(r, childPath, expr, excludes); err != nil {
 			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
 		}
 	}
 	return nil
+}
+
+func relPath(r *repo.Repository, path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(r.Path, abs)
+	if err != nil {
+		return path
+	}
+	return filepath.ToSlash(rel)
+}
+
+func pathExcluded(r *repo.Repository, path string, excludes []string) bool {
+	return matchExcludes(r, path, excludes, false)
+}
+
+func dirExcluded(r *repo.Repository, path string, excludes []string) bool {
+	return matchExcludes(r, path, excludes, true)
+}
+
+func matchExcludes(r *repo.Repository, path string, excludes []string, dir bool) bool {
+	if len(excludes) == 0 {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(r.Path, absPath)
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		return false
+	}
+	for _, pattern := range excludes {
+		if repo.MatchGlob(rel, pattern) {
+			return true
+		}
+		if strings.Contains("/"+rel+"/", "/"+pattern+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func reorderFlags(args []string) []string {
+	var flags []string
+	var positional []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			flags = append(flags, args[i:]...)
+			break
+		}
+		if len(args[i]) > 1 && args[i][0] == '-' {
+			flags = append(flags, args[i])
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				if args[i] == "--exclude" || args[i] == "--os-match" {
+					i++
+					flags = append(flags, args[i])
+				}
+			}
+		} else {
+			positional = append(positional, args[i])
+		}
+	}
+	return append(flags, positional...)
+}
+
+func filterMap(m map[string]repo.IndexEntry, patterns []string) map[string]repo.IndexEntry {
+	if len(patterns) == 0 {
+		return m
+	}
+	r := make(map[string]repo.IndexEntry)
+	for k, v := range m {
+		if matchAnyPath(k, patterns) {
+			r[k] = v
+		}
+	}
+	return r
+}
+
+func filterList(list []string, patterns []string) []string {
+	if len(patterns) == 0 {
+		return list
+	}
+	var r []string
+	for _, p := range list {
+		if matchAnyPath(p, patterns) {
+			r = append(r, p)
+		}
+	}
+	return r
+}
+
+func matchAnyPath(path string, patterns []string) bool {
+	for _, p := range patterns {
+		if path == p || strings.HasPrefix(path, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 // ---- rm ----
 func runRm(args []string) error {
@@ -335,9 +472,29 @@ func runStatus(args []string) error {
 		return err
 	}
 
+	var filter []string
+	for _, a := range args {
+		abs, err := filepath.Abs(a)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(r.Path, abs)
+		if err != nil {
+			continue
+		}
+		filter = append(filter, filepath.ToSlash(rel))
+	}
+
 	s, err := r.WorkTreeStatus()
 	if err != nil {
 		return err
+	}
+
+	if len(filter) > 0 {
+		s.Staged = filterMap(s.Staged, filter)
+		s.Modified = filterList(s.Modified, filter)
+		s.Deleted = filterList(s.Deleted, filter)
+		s.Untracked = filterList(s.Untracked, filter)
 	}
 	if s.Branch != "" {
 		fmt.Printf("On branch: %s\n", s.Branch)

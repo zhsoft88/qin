@@ -150,8 +150,14 @@ func TestAddDirectoryRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err := repo.AddFile(subdir); err != nil {
+		t.Fatal(err)
+	}
+	// Non-empty directory should still be rejected
+	subfile := filepath.Join(subdir, "f.txt")
+	ioutil.WriteFile(subfile, []byte("content"), 0644)
 	if err := repo.AddFile(subdir); err == nil {
-		t.Fatal("expected error when adding directory")
+		t.Fatal("expected error when adding non-empty directory")
 	}
 }
 

@@ -32,8 +32,8 @@ func TestStatusClean(t *testing.T) {
 	if s.Branch != "main" {
 		t.Fatalf("expected main, got %s", s.Branch)
 	}
-	if len(s.Staged) != 1 {
-		t.Fatalf("expected 1 staged, got %d", len(s.Staged))
+	if len(s.Staged) != 0 {
+		t.Fatalf("expected 0 staged (committed files filtered), got %d", len(s.Staged))
 	}
 	if len(s.Modified) != 0 {
 		t.Fatalf("expected 0 modified, got %d", len(s.Modified))

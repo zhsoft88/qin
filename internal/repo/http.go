@@ -307,7 +307,13 @@ func (r *Repository) pushHTTP(baseURL, remoteName string) error {
 	}
 
 	// Upload all missing objects
+	total := len(allObjects)
+	i := 0
 	for h := range allObjects {
+		i++
+		if total > 1 {
+			fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d", i, total)
+		}
 		data, err := ioutil.ReadFile(r.objectPath(h))
 		if err != nil {
 			return fmt.Errorf("read %s: %w", h.Short(), err)
@@ -315,6 +321,9 @@ func (r *Repository) pushHTTP(baseURL, remoteName string) error {
 		if err := httpPut(baseURL, "objects/"+h.String(), data); err != nil {
 			return fmt.Errorf("upload %s: %w", h.Short(), err)
 		}
+	}
+	if total > 1 {
+		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
 	}
 
 	// Update remote refs

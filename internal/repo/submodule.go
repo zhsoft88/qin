@@ -29,6 +29,15 @@ func IsSubmoduleMode(mode uint32) bool {
 	return mode == SubmoduleMode
 }
 
+// DirMode is the mode constant for empty directory entries.
+// 040000 follows git's convention for tree entries.
+const DirMode = 040000
+
+// IsDirMode returns true if the mode indicates an empty directory entry.
+func IsDirMode(mode uint32) bool {
+	return mode == DirMode
+}
+
 // LoadLoModules reads .lomodules from disk. Returns an empty mapping
 // if the file doesn't exist.
 func LoadLoModules(r *Repository) (*LoModules, error) {

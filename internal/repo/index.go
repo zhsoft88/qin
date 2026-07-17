@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/zhsoft88/lo/internal/core"
 )
@@ -129,7 +130,22 @@ func (r *Repository) AddFileOSMatch(filePath, expr string) error {
 }
 
 // addFileInternal is the shared implementation for AddFile, AddFileOS, and AddFileOSMatch.
+// It loads the index, processes one file, and saves — use AddFiles/AddFilesOSMatch
+// for batch operations that avoid per-file index save.
 func (r *Repository) addFileInternal(filePath string, osID uint8, oss []uint8) error {
+	idx, err := r.LoadIndex()
+	if err != nil {
+		return err
+	}
+	if err := r.AddFileToIndex(filePath, osID, oss, idx); err != nil {
+		return err
+	}
+	return r.SaveIndex(idx)
+}
+
+// addFileToIndex processes a single file and adds it to a pre-loaded index.
+// Does NOT save the index — caller must call SaveIndex.
+func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, idx *Index) error {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
@@ -139,7 +155,7 @@ func (r *Repository) addFileInternal(filePath string, osID uint8, oss []uint8) e
 	if err != nil {
 		return fmt.Errorf("path outside repository: %w", err)
 	}
-	if relPath == "" || relPath[0] == '.' {
+	if relPath == "" || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || relPath == ".." {
 		return fmt.Errorf("path outside repository")
 	}
 
@@ -151,7 +167,17 @@ func (r *Repository) addFileInternal(filePath string, osID uint8, oss []uint8) e
 	isSymlink := fi.Mode()&os.ModeSymlink != 0
 
 	if !isSymlink && fi.IsDir() {
-		return fmt.Errorf("cannot add directory: %s", filePath)
+		// Allow empty directories
+		empty, _ := isDirEmpty(absPath)
+		if !empty {
+			return fmt.Errorf("cannot add non-empty directory: %s", filePath)
+		}
+		key := entryKey(filepath.ToSlash(relPath), osID)
+		idx.Entries[key] = IndexEntry{
+			Mode: DirMode,
+			OSS:  oss,
+		}
+		return nil
 	}
 
 	ignorer, err := r.LoadIgnoreMatcher()
@@ -196,11 +222,6 @@ func (r *Repository) addFileInternal(filePath string, osID uint8, oss []uint8) e
 
 	mode := uint32(fi.Mode())
 
-	idx, err := r.LoadIndex()
-	if err != nil {
-		return err
-	}
-
 	key := entryKey(filepath.ToSlash(relPath), osID)
 	idx.Entries[key] = IndexEntry{
 		Hash:        h,
@@ -208,6 +229,65 @@ func (r *Repository) addFileInternal(filePath string, osID uint8, oss []uint8) e
 		Size:        fi.Size(),
 		Mode:        mode,
 		OSS:         oss,
+	}
+	return nil
+}
+
+// isDirEmpty checks whether a directory has no entries.
+func isDirEmpty(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	_, err = f.Readdir(1)
+	if err != nil {
+		return true, nil // empty
+	}
+	return false, nil // has entries
+}
+
+// AddFiles adds multiple files in a batch — loads index once, saves once.
+func (r *Repository) AddFiles(files []string) error {
+	return r.AddFilesOSMatch(files, "")
+}
+
+// AddFilesOSMatch adds multiple files with an OS expression in a batch.
+func (r *Repository) AddFilesOSMatch(files []string, expr string) error {
+	include, exclude, err := ParseOSExpr(expr)
+	if err != nil {
+		return fmt.Errorf("invalid OS expression: %w", err)
+	}
+
+	idx, err := r.LoadIndex()
+	if err != nil {
+		return err
+	}
+
+	for _, f := range files {
+		var oss []uint8
+		var osID uint8
+		if expr != "" && expr != "*" {
+			include, exclude, _ = ParseOSExpr(expr)
+			if len(include) > 0 && len(exclude) == 0 {
+				for id := range include {
+					oss = append(oss, id)
+				}
+				if len(oss) == 1 {
+					osID = oss[0]
+				}
+			} else if len(exclude) > 0 {
+				for _, name := range KnownOSes {
+					id := OSID(name)
+					if !exclude[id] {
+						oss = append(oss, id)
+					}
+				}
+			}
+		}
+		if err := r.AddFileToIndex(f, osID, oss, idx); err != nil {
+			return fmt.Errorf("add %s: %w", f, err)
+		}
 	}
 
 	return r.SaveIndex(idx)

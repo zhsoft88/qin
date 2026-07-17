@@ -456,10 +456,19 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 		}
 	}
 
+	total := len(allObjects)
+	i := 0
 	for h := range allObjects {
+		i++
+		if total > 1 {
+			fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d", i, total)
+		}
 		if err := copyObject(remoteRepo, r, h); err != nil {
 			return fmt.Errorf("copy object %s: %w", h.Short(), err)
 		}
+	}
+	if total > 1 {
+		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
 	}
 
 	for branchName, hash := range branchRefs {
@@ -599,24 +608,29 @@ func Clone(url, dir string, lazy bool) (*Repository, error) {
 	trackingRef := "refs/remotes/origin/" + branchName
 	hashStr, err := r.ReadRef(trackingRef)
 	if err != nil {
-		// Fall back to any available ref that has a remote-tracking ref
+		// Fall back to any available remote-tracking ref
 		branches, _ := r.remoteBranches(url, "origin")
 		if len(branches) > 0 {
 			branchName = branches[0]
 			trackingRef = "refs/remotes/origin/" + branchName
 			hashStr, err = r.ReadRef(trackingRef)
 		}
-		if err != nil {
-			return nil, fmt.Errorf("cannot determine default branch")
+	}
+
+	if hashStr != "" {
+		// Remote has commits — create local branch and check it out
+		if err := r.WriteRef("refs/heads/"+branchName, hashStr); err != nil {
+			return nil, fmt.Errorf("create local branch: %w", err)
 		}
-	}
-
-	if err := r.WriteRef("refs/heads/"+branchName, hashStr); err != nil {
-		return nil, fmt.Errorf("create local branch: %w", err)
-	}
-
-	if err := r.SwitchBranch(branchName); err != nil {
-		return nil, fmt.Errorf("checkout branch: %w", err)
+		if err := r.SwitchBranch(branchName); err != nil {
+			return nil, fmt.Errorf("checkout branch: %w", err)
+		}
+	} else {
+		// Empty remote — set HEAD to match the remote's default branch name
+		fmt.Printf("warning: cloned an empty repository\n")
+		if err := r.SetHEAD("ref: refs/heads/" + branchName); err != nil {
+			return nil, err
+		}
 	}
 
 	return r, nil
@@ -683,7 +697,11 @@ func (r *Repository) remoteBranches(remoteURL, remoteName string) ([]string, err
 		sort.Strings(branches)
 		return branches, nil
 	}
-	// Local path — use remote-tracking refs already fetched
-	branches, _, err := r.ListBranches()
+	// Local path — open remote repo and list its branches
+	remoteRepo, err := Open(remoteURL)
+	if err != nil {
+		return nil, err
+	}
+	branches, _, err := remoteRepo.ListBranches()
 	return branches, err
 }

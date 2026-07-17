@@ -197,3 +197,9 @@ func globMatch(s, p string) bool {
 	return false
 }
 
+// MatchGlob checks if path matches a glob pattern (non-anchored, gitignore-style).
+// Supports *, ?, and **.
+func MatchGlob(path, pattern string) bool {
+	return matchGlob(path, pattern, false)
+}
+
