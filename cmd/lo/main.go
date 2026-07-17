@@ -202,7 +202,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		if repo.TermWidth() > 0 {
 			cd := 1
 			for n := *added; n >= 10; n /= 10 { cd++ }
-			max := repo.TermWidth() - 12 - cd
+			max := repo.TermWidth() - 13 - cd
 			if len(display) > max && max > 10 {
 				half := (max - 3) // 2
 				display = display[:half] + "..." + display[len(display)-half:]
@@ -250,7 +250,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		if repo.TermWidth() > 0 {
 			cd := 1
 			for n := *added; n >= 10; n /= 10 { cd++ }
-			max := repo.TermWidth() - 12 - cd - len(expr)
+			max := repo.TermWidth() - 13 - cd - len(expr)
 			if len(display) > max && max > 10 {
 				half := (max - 3) // 2
 				display = display[:half] + "..." + display[len(display)-half:]
