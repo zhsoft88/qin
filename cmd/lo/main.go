@@ -210,6 +210,9 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		const addSuf = " [*]   "
 		overhead := len(addPre) + len("] ") + len(addSuf)
 		max := w - 2 - overhead - cd
+		if max > 50 {
+			max = 50
+		}
 		if max < 5 {
 			max = 5
 		}
@@ -269,6 +272,9 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		midLen := len("] ") + len(" [")
 		overhead := len(ePre) + midLen + len(expr) + len(eSuffix)
 		max := w - 2 - overhead - cd
+		if max > 50 {
+			max = 50
+		}
 		if max < 5 {
 			max = 5
 		}
