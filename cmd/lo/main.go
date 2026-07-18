@@ -217,9 +217,11 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		overhead := len(addPre) + len("] ") + len(addSuf)
 		max := w - 2 - overhead - cd
 		if len(display) > max {
-			half := (max - 3) // 2
-			if half > 0 {
-				display = display[:half] + "..." + display[len(display)-half:]
+			keep := max - 3
+			if keep > 0 {
+				first := (keep + 1) / 2
+				last := keep / 2
+				display = display[:first] + "..." + display[len(display)-last:]
 			} else {
 				display = display[:max]
 			}
@@ -273,9 +275,11 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		overhead := len(ePre) + midLen + len(expr) + len(eSuffix)
 		max := w - 2 - overhead - cd
 		if len(display) > max {
-			half := (max - 3) // 2
-			if half > 0 {
-				display = display[:half] + "..." + display[len(display)-half:]
+			keep := max - 3
+			if keep > 0 {
+				first := (keep + 1) / 2
+				last := keep / 2
+				display = display[:first] + "..." + display[len(display)-last:]
 			} else {
 				display = display[:max]
 			}
