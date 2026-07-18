@@ -199,18 +199,27 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		}
 		(*added)++
 		display := relPath(r, path)
-		if repo.TermWidth() > 0 {
-			cd := 1
-			for n := *added; n >= 10; n /= 10 { cd++ }
-			max := repo.TermWidth() - 18 - cd
-			if len(display) > max && max > 10 {
-				half := (max - 3) // 2
-				display = display[:half] + "..." + display[len(display)-half:]
-			}
-			fmt.Fprintf(os.Stderr, "  [%d] %-*s [*]   ", *added, max, display)
-		} else {
-			fmt.Fprintf(os.Stderr, "  [%d] %s [*]   ", *added, display)
+		cd := 1
+		for n := *added; n >= 10; n /= 10 { cd++ }
+		w := repo.TermWidth()
+		if w <= 0 {
+			w = 80
 		}
+		// Total width = w - 2 (safety). Overhead = "  [N] " + " [*]   " +  = 14
+		overhead := 14
+		max := w - 2 - overhead - cd
+		if max < 5 {
+			max = 5
+		}
+		if len(display) > max {
+			half := (max - 3) // 2
+			if half > 0 {
+				display = display[:half] + "..." + display[len(display)-half:]
+			} else {
+				display = display[:max]
+			}
+		}
+		fmt.Fprintf(os.Stderr, "  [%d] %-*s [*]   ", *added, max, display)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
@@ -247,18 +256,26 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		}
 		(*added)++
 		display := relPath(r, path)
-		if repo.TermWidth() > 0 {
-			cd := 1
-			for n := *added; n >= 10; n /= 10 { cd++ }
-			max := repo.TermWidth() - 18 - cd - len(expr)
-			if len(display) > max && max > 10 {
-				half := (max - 3) // 2
-				display = display[:half] + "..." + display[len(display)-half:]
-			}
-			fmt.Fprintf(os.Stderr, "  [%d] %-*s [%s]   ", *added, max, display, expr)
-		} else {
-			fmt.Fprintf(os.Stderr, "  [%d] %s [%s]   ", *added, display, expr)
+		cd := 1
+		for n := *added; n >= 10; n /= 10 { cd++ }
+		w := repo.TermWidth()
+		if w <= 0 {
+			w = 80
 		}
+		overhead := 14 + len(expr)  // includes [expr]
+		max := w - 2 - overhead - cd
+		if max < 5 {
+			max = 5
+		}
+		if len(display) > max {
+			half := (max - 3) // 2
+			if half > 0 {
+				display = display[:half] + "..." + display[len(display)-half:]
+			} else {
+				display = display[:max]
+			}
+		}
+		fmt.Fprintf(os.Stderr, "  [%d] %-*s [%s]   ", *added, max, display, expr)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
