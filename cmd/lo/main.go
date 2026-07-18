@@ -205,17 +205,10 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		if w <= 0 {
 			w = 80
 		}
-		// Total width = w - 2 (safety). Overhead = "  [N] " + " [*]   " +  = 14
 		const addPre = "\r  ["
 		const addSuf = " [*]   "
 		overhead := len(addPre) + len("] ") + len(addSuf)
 		max := w - 2 - overhead - cd
-		if max > 50 {
-			max = 50
-		}
-		if max < 5 {
-			max = 5
-		}
 		if len(display) > max {
 			half := (max - 3) // 2
 			if half > 0 {
@@ -228,7 +221,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
-		fmt.Fprintf(os.Stderr, "  skip: %s   \n", path)
+		fmt.Fprintf(os.Stderr, "\nskip: %s   \n", path)
 		return nil
 	}
 	entries, err := ioutil.ReadDir(path)
@@ -272,12 +265,6 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		midLen := len("] ") + len(" [")
 		overhead := len(ePre) + midLen + len(expr) + len(eSuffix)
 		max := w - 2 - overhead - cd
-		if max > 50 {
-			max = 50
-		}
-		if max < 5 {
-			max = 5
-		}
 		if len(display) > max {
 			half := (max - 3) // 2
 			if half > 0 {
@@ -290,7 +277,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
-		fmt.Fprintf(os.Stderr, "  skip: %s   \n", path)
+		fmt.Fprintf(os.Stderr, "\nskip: %s   \n", path)
 		return nil
 	}
 	entries, err := ioutil.ReadDir(path)
@@ -416,10 +403,10 @@ func matchAnyPath(path string, patterns []string) bool {
 func clearLine() {
 	w := repo.TermWidth()
 	if w <= 0 {
-		fmt.Fprintf(os.Stderr, "                          ")
+		fmt.Fprintf(os.Stderr, "\n")
 		return
 	}
-	fmt.Fprintf(os.Stderr, "  %-*s", w-2, " ")
+	fmt.Fprintf(os.Stderr, "\n%-*s\n", w-2, " ")
 }
 // ---- rm ----
 func runRm(args []string) error {
