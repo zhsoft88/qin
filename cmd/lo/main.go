@@ -221,7 +221,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 				display = display[:max]
 			}
 		}
-		fmt.Fprintf(os.Stderr, "  [%d] %-*s [*]   ", *added, max, display)
+		fmt.Fprintf(os.Stderr, addPre+"%d] %-*s"+addSuf, *added, max, display)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
@@ -265,8 +265,9 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			w = 80
 		}
 		const ePre = "\r  ["
+		const eSuffix = "]   "
 		midLen := len("] ") + len(" [")
-		overhead := len(ePre) + midLen + len(expr) + len("]   ")
+		overhead := len(ePre) + midLen + len(expr) + len(eSuffix)
 		max := w - 2 - overhead - cd
 		if max < 5 {
 			max = 5
@@ -279,7 +280,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 				display = display[:max]
 			}
 		}
-		fmt.Fprintf(os.Stderr, "  [%d] %-*s [%s]   ", *added, max, display, expr)
+		fmt.Fprintf(os.Stderr, ePre+"%d] %-*s [%s"+eSuffix, *added, max, display, expr)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
