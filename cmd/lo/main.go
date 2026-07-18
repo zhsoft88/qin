@@ -179,7 +179,6 @@ func runAdd(args []string) error {
 		}
 	}
 	if added > 0 {
-		clearLine()
 		fmt.Printf("added %d file(s)\n", added)
 	}
 	return nil
@@ -206,8 +205,8 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			w = 80
 		}
 		// Total width = w - 2 (safety). Overhead = "  [N] " + " [*]   " +  = 14
-		const addPre = "\r  ["
-		const addSuf = " [*]   "
+		const addPre = "  ["
+		const addSuf = " [*]   \n"
 		overhead := len(addPre) + len("] ") + len(addSuf)
 		max := w - 2 - overhead - cd
 		if max < 5 {
@@ -264,8 +263,8 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		if w <= 0 {
 			w = 80
 		}
-		const ePre = "\r  ["
-		const eSuffix = "]   "
+		const ePre = "  ["
+		const eSuffix = "]   \n"
 		midLen := len("] ") + len(" [")
 		overhead := len(ePre) + midLen + len(expr) + len(eSuffix)
 		max := w - 2 - overhead - cd
