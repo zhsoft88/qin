@@ -206,7 +206,9 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			w = 80
 		}
 		// Total width = w - 2 (safety). Overhead = "  [N] " + " [*]   " +  = 14
-		overhead := 14
+		const addPre = "\r  ["
+		const addSuf = " [*]   "
+		overhead := len(addPre) + len("] ") + len(addSuf)
 		max := w - 2 - overhead - cd
 		if max < 5 {
 			max = 5
@@ -262,7 +264,9 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		if w <= 0 {
 			w = 80
 		}
-		overhead := 14 + len(expr)  // includes [expr]
+		const ePre = "\r  ["
+		midLen := len("] ") + len(" [")
+		overhead := len(ePre) + midLen + len(expr) + len("]   ")
 		max := w - 2 - overhead - cd
 		if max < 5 {
 			max = 5
