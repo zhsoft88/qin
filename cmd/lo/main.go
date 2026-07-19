@@ -257,7 +257,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			return err
 		}
 		(*added)++
-		fmt.Fprintf(os.Stderr, "  [%d] %s/ [*]   \n", *added, relPath(r, path))
+		fmt.Fprintf(os.Stderr, "\r  [%d] %s/ [*]   ", *added, relPath(r, path))
 		return nil
 	}
 	for _, entry := range entries {
@@ -361,7 +361,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			return err
 		}
 		(*added)++
-		fmt.Fprintf(os.Stderr, "  [%d] %s/ [*]   \n", *added, relPath(r, path))
+		fmt.Fprintf(os.Stderr, "\r  [%d] %s/ [*]   ", *added, relPath(r, path))
 		return nil
 	}
 	for _, entry := range entries {
