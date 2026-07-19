@@ -237,6 +237,14 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 	if err != nil {
 		return err
 	}
+	if len(entries) == 0 {
+		if err := r.AddFileToIndex(path, 0, nil, idx); err != nil {
+			return err
+		}
+		(*added)++
+		fmt.Fprintf(os.Stderr, "  [%d] %s/ [*]   \n", *added, relPath(r, path))
+		return nil
+	}
 	for _, entry := range entries {
 		if entry.Name() == ".lo" || entry.Name() == ".loignore" {
 			continue
@@ -317,6 +325,14 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 	entries, err := ioutil.ReadDir(path)
 	if err != nil {
 		return err
+	}
+	if len(entries) == 0 {
+		if err := r.AddFileToIndex(path, 0, nil, idx); err != nil {
+			return err
+		}
+		(*added)++
+		fmt.Fprintf(os.Stderr, "  [%d] %s/ [*]   \n", *added, relPath(r, path))
+		return nil
 	}
 	for _, entry := range entries {
 		if entry.Name() == ".lo" || entry.Name() == ".loignore" {
