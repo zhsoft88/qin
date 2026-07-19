@@ -241,7 +241,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 				display = display[:max]
 			}
 		}
-		fmt.Fprintf(os.Stderr, addPre+"%d] %-*s"+addSuf, *added, max, display)
+		fmt.Fprintf(os.Stdout, addPre+"%d] %-*s"+addSuf, *added, max, display)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
@@ -345,7 +345,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 				display = display[:max]
 			}
 		}
-		fmt.Fprintf(os.Stderr, ePre+"%d] %-*s [%s"+eSuffix, *added, max, display, expr)
+		fmt.Fprintf(os.Stdout, ePre+"%d] %-*s [%s"+eSuffix, *added, max, display, expr)
 		return nil
 	}
 	if dirExcluded(r, path, excludes) {
