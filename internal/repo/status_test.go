@@ -145,7 +145,7 @@ func TestStatusSkipsLoDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create a file inside .lo (should be ignored)
+	// Create a file inside .qin (should be ignored)
 	ioutil.WriteFile(filepath.Join(dir, LoDir, "test-file"), []byte("should be ignored"), 0644)
 
 	s, err := repo.WorkTreeStatus()

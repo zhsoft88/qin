@@ -19,7 +19,7 @@ type Remote struct {
 
 // ---- Remote URL CRUD ----
 
-// SaveRemote writes a remote URL to .lo/remotes/<name>.
+// SaveRemote writes a remote URL to .qin/remotes/<name>.
 func (r *Repository) SaveRemote(name, url string) error {
 	remotesDir := filepath.Join(r.LoDir(), "remotes")
 	if err := os.MkdirAll(remotesDir, 0755); err != nil {

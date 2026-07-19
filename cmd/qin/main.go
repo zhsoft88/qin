@@ -1636,7 +1636,7 @@ func runSubmodule(args []string) error {
 		}
 		for path, def := range mods.Submodules {
 			subPath := filepath.Join(r.Path, path)
-			_, statErr := os.Stat(filepath.Join(subPath, ".lo"))
+			_, statErr := os.Stat(filepath.Join(subPath, ".qin"))
 			if os.IsNotExist(statErr) {
 				fmt.Printf("  %s -> %s (not initialized)\n", path, def.URL)
 			} else {

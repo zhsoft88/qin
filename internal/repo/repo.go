@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-const LoDir = ".lo"
+var LoDir = ".qin"
 
 type Repository struct {
 	Path   string
