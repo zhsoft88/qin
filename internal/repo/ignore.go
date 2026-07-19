@@ -19,11 +19,11 @@ type ignorePattern struct {
 	anchored bool
 }
 
-// LoadIgnoreMatcher reads .loignore from the repo root.
+// LoadIgnoreMatcher reads .qinignore from the repo root.
 // Returns an empty matcher if the file doesn't exist.
 func (r *Repository) LoadIgnoreMatcher() (*IgnoreMatcher, error) {
 	m := &IgnoreMatcher{}
-	path := filepath.Join(r.Path, ".loignore")
+	path := filepath.Join(r.Path, ".qinignore")
 	f, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {

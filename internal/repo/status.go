@@ -135,7 +135,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 			}
 			return nil
 		}
-		if rel == ".loignore" {
+		if rel == ".qinignore" {
 			return nil
 		}
 

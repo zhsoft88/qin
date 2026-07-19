@@ -284,7 +284,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		return nil
 	}
 	for _, entry := range entries {
-		if entry.Name() == ".lo" || entry.Name() == ".loignore" {
+		if entry.Name() == ".lo" || entry.Name() == ".qinignore" {
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
@@ -411,7 +411,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		return nil
 	}
 	for _, entry := range entries {
-		if entry.Name() == ".lo" || entry.Name() == ".loignore" {
+		if entry.Name() == ".lo" || entry.Name() == ".qinignore" {
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())

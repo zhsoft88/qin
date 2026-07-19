@@ -9,7 +9,7 @@ import (
 
 func writeIgnore(t *testing.T, dir, content string) {
 	t.Helper()
-	if err := ioutil.WriteFile(filepath.Join(dir, ".loignore"), []byte(content), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(dir, ".qinignore"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 }

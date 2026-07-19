@@ -194,7 +194,7 @@ func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, id
 	}
 	relFormatted := filepath.ToSlash(relPath)
 	if ignorer.Match(relFormatted, false) {
-		return fmt.Errorf("matches .loignore")
+		return fmt.Errorf("matches .qinignore")
 	}
 
 	var data []byte
