@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 // StoreObject serializes, compresses, and writes an object to the content-addressable store.

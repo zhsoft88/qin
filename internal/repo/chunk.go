@@ -3,7 +3,7 @@ package repo
 import (
 	"fmt"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 // ChunkRef references a single chunk within a chunked file.

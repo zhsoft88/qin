@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 func TestFindMergeBaseLinear(t *testing.T) {

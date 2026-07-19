@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 // DanglingCommit describes an unreachable commit.

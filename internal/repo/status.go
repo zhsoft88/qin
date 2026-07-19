@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 // Status holds the complete working tree status.

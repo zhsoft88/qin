@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 // CherryPick applies the changes introduced by the given commit onto the

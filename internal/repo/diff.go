@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 // DiffFile describes a single file change between two trees.

@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 // GraphCommit is a commit node with its hash for graph walking.

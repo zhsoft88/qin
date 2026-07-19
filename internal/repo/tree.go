@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 // TreeEntry is a single file entry in a tree snapshot.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zhsoft88/lo/internal/core"
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 func TestSaveLoadListRemoveRemote(t *testing.T) {
