@@ -186,6 +186,7 @@ func runAdd(args []string) error {
 		if err := r.SaveIndex(idx); err != nil {
 			return err
 		}
+		clearLine()
 		fmt.Printf("added %d file(s)\n", added)
 	}
 	return nil
