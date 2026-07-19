@@ -166,6 +166,14 @@ func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, id
 
 	isSymlink := fi.Mode()&os.ModeSymlink != 0
 
+	// Quick skip: file already in index with same size
+	skipKey := entryKey(filepath.ToSlash(relPath), osID)
+	if !isSymlink && !fi.IsDir() {
+		if existing, ok := idx.Entries[skipKey]; ok && existing.Size == fi.Size() && existing.Mode != DirMode {
+			return nil
+		}
+	}
+
 	if !isSymlink && fi.IsDir() {
 		// Allow empty directories
 		empty, _ := isDirEmpty(absPath)
