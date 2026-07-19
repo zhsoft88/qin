@@ -258,7 +258,30 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
-		if err := r.AddFileOSMatch(path, expr); err != nil {
+		var oss []uint8
+		var osID uint8
+		if expr != "" && expr != "*" {
+			inc, exc, err := repo.ParseOSExpr(expr)
+			if err != nil {
+				return fmt.Errorf("invalid OS expression: %w", err)
+			}
+			if len(inc) > 0 && len(exc) == 0 {
+				for id := range inc {
+					oss = append(oss, id)
+				}
+				if len(oss) == 1 {
+					osID = oss[0]
+				}
+			} else if len(exc) > 0 {
+				for _, name := range repo.KnownOSes {
+					id := repo.OSID(name)
+					if !exc[id] {
+						oss = append(oss, id)
+					}
+				}
+			}
+		}
+		if err := r.AddFileToIndex(path, osID, oss, idx); err != nil {
 			return err
 		}
 		(*added)++
