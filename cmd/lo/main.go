@@ -257,7 +257,34 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			return err
 		}
 		(*added)++
-		fmt.Fprintf(os.Stderr, "\r  [%d] %s/ [*]   ", *added, relPath(r, path))
+		display := relPath(r, path) + "/"
+		cd := 1
+		for n := *added; n >= 10; n /= 10 { cd++ }
+		w := repo.TermWidth()
+		if w <= 0 {
+			w = 80
+		}
+		const dPre = "\r  ["
+		const dSuf = " [*]   "
+		overhead := len(dPre) + len("] ") + len(dSuf)
+		max := w - 2 - overhead - cd
+		if max > 60 {
+			max = 60
+		}
+		if max < 10 {
+			max = 10
+		}
+		if len(display) > max {
+			keep := max - 3
+			if keep > 0 {
+				first := (keep + 1) // 2
+				last := keep // 2
+				display = display[:first] + "..." + display[len(display)-last:]
+			} else {
+				display = display[:max]
+			}
+		}
+		fmt.Fprintf(os.Stderr, dPre+"%d] %-*s"+dSuf, *added, max, display)
 		return nil
 	}
 	for _, entry := range entries {
@@ -361,7 +388,34 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			return err
 		}
 		(*added)++
-		fmt.Fprintf(os.Stderr, "\r  [%d] %s/ [*]   ", *added, relPath(r, path))
+		display := relPath(r, path) + "/"
+		cd := 1
+		for n := *added; n >= 10; n /= 10 { cd++ }
+		w := repo.TermWidth()
+		if w <= 0 {
+			w = 80
+		}
+		const dPre = "\r  ["
+		const dSuf = " [*]   "
+		overhead := len(dPre) + len("] ") + len(dSuf)
+		max := w - 2 - overhead - cd
+		if max > 60 {
+			max = 60
+		}
+		if max < 10 {
+			max = 10
+		}
+		if len(display) > max {
+			keep := max - 3
+			if keep > 0 {
+				first := (keep + 1) // 2
+				last := keep // 2
+				display = display[:first] + "..." + display[len(display)-last:]
+			} else {
+				display = display[:max]
+			}
+		}
+		fmt.Fprintf(os.Stderr, dPre+"%d] %-*s"+dSuf, *added, max, display)
 		return nil
 	}
 	for _, entry := range entries {
