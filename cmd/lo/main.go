@@ -284,7 +284,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 				display = display[:max]
 			}
 		}
-		fmt.Fprintf(os.Stderr, dPre+"%d] %-*s"+dSuf, *added, max, display)
+		fmt.Fprintf(os.Stdout, dPre+"%d] %-*s"+dSuf, *added, max, display)
 		return nil
 	}
 	for _, entry := range entries {
@@ -415,7 +415,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 				display = display[:max]
 			}
 		}
-		fmt.Fprintf(os.Stderr, dPre+"%d] %-*s"+dSuf, *added, max, display)
+		fmt.Fprintf(os.Stdout, dPre+"%d] %-*s"+dSuf, *added, max, display)
 		return nil
 	}
 	for _, entry := range entries {
@@ -540,7 +540,7 @@ func clearLine() {
 		fmt.Fprintf(os.Stderr, "\n")
 		return
 	}
-	fmt.Fprintf(os.Stderr, "\n%-*s\n", w-2, " ")
+	fmt.Fprintf(os.Stdout, "\n%-*s\n", w-2, " ")
 }
 // ---- rm ----
 func runRm(args []string) error {
