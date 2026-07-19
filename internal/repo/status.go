@@ -32,7 +32,7 @@ func (r *Repository) WorkTreeStatus() (*Status, error) {
 // When include and exclude are both nil, the current OS is used as the filter.
 func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, filterPaths ...string) (*Status, error) {
 	phase := "loading index"
-	fmt.Fprintf(os.Stderr, "\r  %s...", phase)
+	fmt.Fprintf(os.Stdout, "\r  %s...", phase)
 	idx, err := r.LoadIndex()
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	}
 
 	phase = "comparing HEAD"
-	fmt.Fprintf(os.Stderr, "\r  %s...", phase)
+	fmt.Fprintf(os.Stdout, "\r  %s...", phase)
 	// Snapshot for deletion check (before filtering committed entries)
 	allVisible := make(map[string]IndexEntry, len(visible))
 	for k, v := range visible {
@@ -93,7 +93,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 
 	// Track all base paths (including non-visible OS variants) for directory tracking
 	phase = "building maps"
-	fmt.Fprintf(os.Stderr, "\r  %s...", phase)
+	fmt.Fprintf(os.Stdout, "\r  %s...", phase)
 	tracked := make(map[string]bool)
 	trackedDirs := make(map[string]bool)
 	allEntries := make(map[string]IndexEntry)
@@ -144,7 +144,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		checked++
 		phase = "scanning"
 		if checked%100 == 0 || checked == 1 {
-			fmt.Fprintf(os.Stderr, "\r  scanned: %d", checked)
+			fmt.Fprintf(os.Stdout, "\r  scanned: %d", checked)
 		}
 		if fi.IsDir() {
 			// Skip submodule directories — their content belongs to the submodule repo
@@ -185,7 +185,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	}
 
 	if checked > 0 {
-		clearLine(os.Stderr)
+		clearLine(os.Stdout)
 	}
 	sort.Strings(s.Untracked)
 	sort.Strings(s.Modified)
