@@ -179,12 +179,21 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
-	for _, chunk := range manifest.Chunks {
+	total := len(manifest.Chunks)
+	downloaded := 0
+	for i, chunk := range manifest.Chunks {
 		if !r.HasObject(chunk.Hash) {
+			if total > 1 {
+				fmt.Fprintf(os.Stderr, "\r  pulling chunks: %d/%d", i+1, total)
+			}
 			if err := r.copyObjectFromRemote(remoteURL, chunk.Hash); err != nil {
 				return fmt.Errorf("copy chunk %s: %w", chunk.Hash.Short(), err)
 			}
+			downloaded++
 		}
+	}
+	if total > 1 && downloaded > 0 {
+		fmt.Fprintf(os.Stderr, "\r  pulled %d chunk(s)\n", downloaded)
 	}
 
 	// Reconstruct and write real file content
@@ -461,14 +470,14 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d", i, total)
+			fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d", i, total)
 		}
 		if err := copyObject(remoteRepo, r, h); err != nil {
 			return fmt.Errorf("copy object %s: %w", h.Short(), err)
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
+		fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d done\n", i, total)
 	}
 
 	for branchName, hash := range branchRefs {

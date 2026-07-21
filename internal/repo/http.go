@@ -239,7 +239,13 @@ func (r *Repository) fetchHTTP(baseURL, remoteName string, lazy bool) error {
 	}
 
 	// Download all missing objects
+	total := len(allObjects)
+	i := 0
 	for h := range allObjects {
+		i++
+		if total > 1 {
+			fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d", i, total)
+		}
 		data, err := httpReadObject(baseURL, h)
 		if err != nil {
 			return fmt.Errorf("read object %s: %w", h.Short(), err)
@@ -261,6 +267,9 @@ func (r *Repository) fetchHTTP(baseURL, remoteName string, lazy bool) error {
 			os.Remove(tmpPath)
 			return fmt.Errorf("rename %s: %w", h.Short(), err)
 		}
+	}
+	if total > 1 {
+		fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d done\n", i, total)
 	}
 
 	// Write remote-tracking refs

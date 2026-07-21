@@ -242,7 +242,13 @@ func (r *Repository) fetchSSH(host, repoPath, remoteName string) error {
 	}
 
 	// Download objects
+	total := len(allObjects)
+	i := 0
 	for h := range allObjects {
+		i++
+		if total > 1 {
+			fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d", i, total)
+		}
 		data, err := sshReadObject(host, repoPath, h)
 		if err != nil {
 			return fmt.Errorf("read object %s: %w", h.Short(), err)
@@ -263,6 +269,9 @@ func (r *Repository) fetchSSH(host, repoPath, remoteName string) error {
 			os.Remove(tmpPath)
 			return err
 		}
+	}
+	if total > 1 {
+		fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d done\n", i, total)
 	}
 
 	// Write remote-tracking refs
@@ -306,7 +315,13 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string) error {
 	}
 
 	// Upload objects
+	total := len(allObjects)
+	i := 0
 	for h := range allObjects {
+		i++
+		if total > 1 {
+			fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d", i, total)
+		}
 		data, err := ioutil.ReadFile(r.objectPath(h))
 		if err != nil {
 			return fmt.Errorf("read %s: %w", h.Short(), err)
@@ -314,6 +329,9 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string) error {
 		if err := sshWriteObject(host, repoPath, h, data); err != nil {
 			return fmt.Errorf("upload %s: %w", h.Short(), err)
 		}
+	}
+	if total > 1 {
+		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
 	}
 
 	// Update refs
