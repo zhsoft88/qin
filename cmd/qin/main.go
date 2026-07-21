@@ -170,14 +170,18 @@ func runAdd(args []string) error {
 	if err != nil {
 		return err
 	}
+	ignorer, err := r.LoadIgnoreMatcher()
+	if err != nil {
+		return err
+	}
 	added := 0
 	for _, f := range fs.Args() {
 		if useOSExpr != "" {
-			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags, &added, idx); err != nil {
+			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags, &added, idx, ignorer); err != nil {
 				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
 			}
 		} else {
-			if err := addFileOrDir(r, f, excludeFlags, &added, idx); err != nil {
+			if err := addFileOrDir(r, f, excludeFlags, &added, idx, ignorer); err != nil {
 				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
 			}
 		}
@@ -192,7 +196,7 @@ func runAdd(args []string) error {
 	return nil
 }
 // addFileOrDir adds a file or directory recursively (default OS).
-func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int, idx *repo.Index) error {
+func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -288,14 +292,21 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
-		if err := addFileOrDir(r, childPath, excludes, added, idx); err != nil {
+		if entry.IsDir() {
+			absChild, _ := filepath.Abs(childPath)
+			relChild, _ := filepath.Rel(r.Path, absChild)
+			if relChild != "" && ignorer.Match(filepath.ToSlash(relChild), true) {
+				continue
+			}
+		}
+		if err := addFileOrDir(r, childPath, excludes, added, idx, ignorer); err != nil {
 			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
 		}
 	}
 	return nil
 }
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
-func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int, idx *repo.Index) error {
+func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -415,7 +426,14 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
-		if err := addFileOrDirExpr(r, childPath, expr, excludes, added, idx); err != nil {
+		if entry.IsDir() {
+			absChild, _ := filepath.Abs(childPath)
+			relChild, _ := filepath.Rel(r.Path, absChild)
+			if relChild != "" && ignorer.Match(filepath.ToSlash(relChild), true) {
+				continue
+			}
+		}
+		if err := addFileOrDirExpr(r, childPath, expr, excludes, added, idx, ignorer); err != nil {
 			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
 		}
 	}

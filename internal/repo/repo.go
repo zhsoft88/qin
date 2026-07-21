@@ -74,7 +74,7 @@ func Open(path string) (*Repository, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return nil, fmt.Errorf("not a repository (no .lo found)")
+			return nil, fmt.Errorf("not a repository (no .qin directory found)")
 		}
 		dir = parent
 	}
