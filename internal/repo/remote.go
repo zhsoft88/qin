@@ -293,7 +293,8 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
-			return fmt.Errorf("object %s (%s): %w", entry.Hash.Short(), entry.Name, err)
+			set[entry.Hash] = true
+			continue
 		}
 
 		if objType == core.ObjectChunkManifest {

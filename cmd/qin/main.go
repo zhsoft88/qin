@@ -210,7 +210,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		rel, _ := filepath.Rel(r.Path, abs)
 		if rel != "" {
 			k := repo.EntryKey(filepath.ToSlash(rel), 0)
-			if e, ok := idx.Entries[k]; ok && e.Size == fi.Size() && e.Mode != repo.DirMode {
+			if e, ok := idx.Entries[k]; ok && e.Size == fi.Size() && e.Mode != repo.DirMode && r.HasObject(e.Hash) {
 				return nil
 			}
 		}
@@ -320,7 +320,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		rel, _ := filepath.Rel(r.Path, abs)
 		if rel != "" {
 			k := repo.EntryKey(filepath.ToSlash(rel), 0)
-			if e, ok := idx.Entries[k]; ok && e.Size == fi.Size() && e.Mode != repo.DirMode {
+			if e, ok := idx.Entries[k]; ok && e.Size == fi.Size() && e.Mode != repo.DirMode && r.HasObject(e.Hash) {
 				return nil
 			}
 		}
