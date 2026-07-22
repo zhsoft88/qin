@@ -143,7 +143,7 @@ func (r *Repository) ObjectType(hash core.Hash) (core.ObjectType, error) {
 		return 0, err
 	}
 	if len(data) == 0 {
-		return 0, fmt.Errorf("empty object file")
+		return 0, fmt.Errorf("object file is empty (corrupt): %s", hash)
 	}
 
 	gr, err := gzip.NewReader(bytes.NewReader(data))
