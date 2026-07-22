@@ -407,7 +407,7 @@ func (r *Repository) collectTreeHTTPBoundary(baseURL string, set map[core.Hash]b
 
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
-			return err
+			return fmt.Errorf("object %s (%s): %w", entry.Hash.Short(), entry.Name, err)
 		}
 
 		if objType == core.ObjectChunkManifest {

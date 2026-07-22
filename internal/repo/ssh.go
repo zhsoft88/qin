@@ -185,7 +185,7 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
-			return err
+			return fmt.Errorf("object %s (%s): %w", entry.Hash.Short(), entry.Name, err)
 		}
 
 		if objType == core.ObjectChunkManifest {
