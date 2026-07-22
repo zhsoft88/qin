@@ -15,6 +15,8 @@ import (
 
 // StoreObject serializes, compresses, and writes an object to the content-addressable store.
 // Returns the SHA256 hash of the uncompressed content (before the header/compression).
+// The write is atomic: data is first written to a .tmp file then renamed to the final path,
+// so partial writes from interrupts never leave a corrupted object file.
 func (r *Repository) StoreObject(objType core.ObjectType, content []byte) (core.Hash, error) {
 	data, err := core.SerializeObject(objType, content)
 	if err != nil {
@@ -24,12 +26,24 @@ func (r *Repository) StoreObject(objType core.ObjectType, content []byte) (core.
 	h := core.HashFromBytes(data)
 	objPath := r.objectPath(h)
 
+	// Already exists — nothing to do
+	if _, err := os.Stat(objPath); err == nil {
+		return h, nil
+	}
+
 	if err := os.MkdirAll(filepath.Dir(objPath), 0755); err != nil {
 		return core.Hash{}, fmt.Errorf("create object dir: %w", err)
 	}
 
-	if err := ioutil.WriteFile(objPath, data, 0644); err != nil {
+	// Atomic write: temp + rename to prevent partial/corrupt files
+	tmpPath := objPath + ".tmp"
+	if err := ioutil.WriteFile(tmpPath, data, 0644); err != nil {
+		os.Remove(tmpPath)
 		return core.Hash{}, fmt.Errorf("write object: %w", err)
+	}
+	if err := os.Rename(tmpPath, objPath); err != nil {
+		os.Remove(tmpPath)
+		return core.Hash{}, fmt.Errorf("rename object: %w", err)
 	}
 
 	return h, nil
