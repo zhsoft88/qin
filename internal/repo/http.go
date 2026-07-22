@@ -200,6 +200,9 @@ func (r *Repository) httpCollectTree(baseURL string, treeHash core.Hash, lazy bo
 			} else {
 				set[entry.Hash] = true
 			}
+			if len(set)%5000 < 10 {
+				fmt.Fprintf(os.Stderr, "\r  scanning: %d objects...", len(set))
+			}
 		}
 		return nil
 	}

@@ -313,6 +313,10 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 		} else {
 			set[entry.Hash] = true
 		}
+		if len(set)%5000 < 10 {
+			fmt.Fprintf(os.Stderr, "\r  scanning: %d objects...", len(set))
+		}
+		
 	}
 
 	return nil
@@ -523,6 +527,7 @@ func (r *Repository) Push(remoteName string) error {
 	allObjects := make(map[core.Hash]bool)
 	branchRefs := make(map[string]core.Hash)
 
+	fmt.Fprintf(os.Stderr, "scanning repository...\n")
 	for _, branchName := range branches {
 		hashStr, err := r.ReadRef("refs/heads/" + branchName)
 		if err != nil {
@@ -543,10 +548,22 @@ func (r *Repository) Push(remoteName string) error {
 		}
 	}
 
+	if len(allObjects) > 1 {
+		fmt.Fprintf(os.Stderr, "\r  found %d objects to push\n", len(allObjects))
+	}
+	total := len(allObjects)
+	i := 0
 	for h := range allObjects {
+		i++
+		if total > 1 {
+			fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d", i, total)
+		}
 		if err := copyObject(r, remoteRepo, h); err != nil {
 			return fmt.Errorf("copy object %s: %w", h.Short(), err)
 		}
+	}
+	if total > 1 {
+		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
 	}
 
 	for branchName, hash := range branchRefs {

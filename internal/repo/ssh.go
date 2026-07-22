@@ -203,6 +203,9 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 		} else {
 			set[entry.Hash] = true
 		}
+		if len(set)%5000 < 10 {
+			fmt.Fprintf(os.Stderr, "  scanning: %d objects...", len(set))
+		}
 	}
 
 	return nil
