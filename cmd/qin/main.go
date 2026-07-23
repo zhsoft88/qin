@@ -205,15 +205,6 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
-		// Skip if already in index with same size
-		abs, _ := filepath.Abs(path)
-		rel, _ := filepath.Rel(r.Path, abs)
-		if rel != "" {
-			k := repo.EntryKey(filepath.ToSlash(rel), 0)
-			if e, ok := idx.Entries[k]; ok && e.Size == fi.Size() && e.Mode != repo.DirMode && r.HasObject(e.Hash) {
-				return nil
-			}
-		}
 		if err := r.AddFileToIndex(path, 0, nil, idx); err != nil {
 			return err
 		}
@@ -315,15 +306,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
-		// Skip if already in index with same size
-		abs, _ := filepath.Abs(path)
-		rel, _ := filepath.Rel(r.Path, abs)
-		if rel != "" {
-			k := repo.EntryKey(filepath.ToSlash(rel), 0)
-			if e, ok := idx.Entries[k]; ok && e.Size == fi.Size() && e.Mode != repo.DirMode && r.HasObject(e.Hash) {
-				return nil
-			}
-		}
+
 		var oss []uint8
 		var osID uint8
 		if expr != "" && expr != "*" {

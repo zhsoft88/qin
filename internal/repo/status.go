@@ -210,7 +210,11 @@ func isParentTracked(tracked map[string]bool, path string) bool {
 
 // clearLine clears the current terminal line by printing spaces.
 func clearLine(w io.Writer) {
-	fmt.Fprintln(w)
+	n := TermWidth()
+	if n <= 0 {
+		n = 80
+	}
+	fmt.Fprintf(w, "\r%*s\r", n, "")
 }
 
 // truncateName shortens a file path for display, keeping start and end.
