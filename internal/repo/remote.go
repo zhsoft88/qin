@@ -549,10 +549,14 @@ func (r *Repository) Push(remoteName string) error {
 		}
 	}
 
-	if len(allObjects) > 1 {
-		fmt.Fprintf(os.Stderr, "\r  found %d objects to push\n", len(allObjects))
-	}
 	total := len(allObjects)
+	if total == 0 {
+		fmt.Fprintf(os.Stderr, "everything up to date\n")
+		return nil
+	}
+	if total > 1 {
+		fmt.Fprintf(os.Stderr, "\r  found %d objects to push\n", total)
+	}
 	i := 0
 	for h := range allObjects {
 		i++
