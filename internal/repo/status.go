@@ -12,6 +12,9 @@ import (
 	"github.com/zhsoft88/qin/internal/core"
 )
 
+// spaces80 is used by clearLine to overwrite progress text on the current line.
+const spaces80 = "                                                                                "
+
 // Status holds the complete working tree status.
 type Status struct {
 	Branch     string
@@ -210,11 +213,7 @@ func isParentTracked(tracked map[string]bool, path string) bool {
 
 // clearLine clears the current terminal line by printing spaces.
 func clearLine(w io.Writer) {
-	n := TermWidth()
-	if n <= 0 {
-		n = 80
-	}
-	fmt.Fprintf(w, "\r%*s\r", n, "")
+	fmt.Fprintf(w, "\r%s\r", spaces80)
 }
 
 // truncateName shortens a file path for display, keeping start and end.
