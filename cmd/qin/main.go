@@ -1136,7 +1136,6 @@ func runPush(args []string) error {
 	if err := r.Push(remote); err != nil {
 		return fmt.Errorf("push: %w", err)
 	}
-	fmt.Printf("pushed to %s\n", remote)
 	return nil
 }
 // ---- fetch ----
