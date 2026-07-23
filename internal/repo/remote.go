@@ -293,7 +293,8 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
-			set[entry.Hash] = true
+			// Object missing locally — skip it
+			fmt.Fprintf(os.Stderr, "\r  warning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
 			continue
 		}
 

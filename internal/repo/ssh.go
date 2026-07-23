@@ -185,7 +185,8 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
-			set[entry.Hash] = true
+			// Object missing locally — skip it
+			fmt.Fprintf(os.Stderr, "\r  warning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
 			continue
 		}
 
@@ -453,7 +454,8 @@ func (r *Repository) sshCollectRemoteTree(host, repoPath string, treeHash core.H
 			}
 
 			if eType == core.ObjectChunkManifest {
-				set[entry.Hash] = true
+				// Object missing locally — skip it
+				fmt.Fprintf(os.Stderr, "\r  warning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
 				var manifest ChunkManifest
 				if err := core.DeserializeJSON(eContent, &manifest); err != nil {
 					return err
