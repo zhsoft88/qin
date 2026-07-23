@@ -570,6 +570,7 @@ func (r *Repository) Push(remoteName string) error {
 	if total > 1 {
 		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
 	}
+	fmt.Fprintf(os.Stderr, "pushed to %s\n", remoteName)
 
 	for branchName, hash := range branchRefs {
 		ref := "refs/heads/" + branchName
