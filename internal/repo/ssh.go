@@ -144,7 +144,8 @@ func (r *Repository) sshCollectMissing(host, repoPath string, hash core.Hash) (m
 
 		commit, err := r.LoadCommit(h)
 		if err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "\r  warning: commit %s missing, skipping\n", h.Short())
+			return nil
 		}
 
 		set[h] = true
@@ -174,7 +175,8 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 
 	tree, err := r.LoadTree(treeHash)
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "\r  warning: tree %s missing, skipping\n", treeHash.Short())
+		return nil
 	}
 	set[treeHash] = true
 

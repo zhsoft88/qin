@@ -244,7 +244,8 @@ func (r *Repository) collectObjects(boundary *Repository, hash core.Hash, lazy b
 
 		commit, err := r.LoadCommit(h)
 		if err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "\r  warning: commit %s missing, skipping\n", h.Short())
+			return nil
 		}
 
 		set[h] = true
@@ -276,7 +277,8 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 
 	tree, err := r.LoadTree(treeHash)
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "\r  warning: tree %s missing, skipping\n", treeHash.Short())
+		return nil
 	}
 
 	set[treeHash] = true
