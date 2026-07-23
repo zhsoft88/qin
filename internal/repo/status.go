@@ -210,12 +210,7 @@ func isParentTracked(tracked map[string]bool, path string) bool {
 
 // clearLine clears the current terminal line by printing spaces.
 func clearLine(w io.Writer) {
-	tw := termWidth()
-	if tw <= 0 {
-		fmt.Fprintf(w, "\r                          \r")
-		return
-	}
-	fmt.Fprintf(w, "\r  %-*s\r", tw-2, " ")
+	fmt.Fprintf(w, "\r                                                                                                                \r")
 }
 
 // truncateName shortens a file path for display, keeping start and end.
@@ -235,10 +230,6 @@ func truncateName(name string, termWidth int) string {
 	return name[:half] + "..." + name[len(name)-half:]
 }
 
-// termWidth returns the terminal width in columns, defaulting to 80.
-func termWidth() int {
-	return TermWidth()
-}
 
 // matchFilterPath returns true if name matches any filter pattern (exact or prefix).
 func matchFilterPath(name string, filters []string) bool {
