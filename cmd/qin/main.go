@@ -85,7 +85,7 @@ func usage() {
 	fmt.Println(`Usage: lo <command> [options]
 Commands:
   init [<path>]     Initialize a new repository (default: current dir)
-  add <file>        Stage file(s) [--os | --os-match <expr>] [--exclude <glob>]
+  add <file>        Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
   rm <file>         Remove staged file(s)
   commit            Create a commit from staged files
   log [--graph]     Show commit history (--graph for branch visualization)
@@ -179,6 +179,10 @@ func runAdd(args []string) error {
 		return err
 	}
 	ignorer, err := r.LoadIgnoreMatcher()
+	if err != nil {
+		return err
+	}
+	excludeFlags, err = expandExcludeFiles(excludeFlags, r.Path)
 	if err != nil {
 		return err
 	}
@@ -441,6 +445,30 @@ func relPath(r *repo.Repository, path string) string {
 		return path
 	}
 	return filepath.ToSlash(rel)
+}
+
+// expandExcludeFiles reads any exclude pattern starting with '@' as a file,
+// replacing it with the non-blank, non-comment lines from that file.
+func expandExcludeFiles(excludes []string, repoPath string) ([]string, error) {
+	var out []string
+	for _, p := range excludes {
+		if !strings.HasPrefix(p, "@") {
+			out = append(out, p)
+			continue
+		}
+		f := filepath.Join(repoPath, p[1:])
+		data, err := ioutil.ReadFile(f)
+		if err != nil {
+			return nil, fmt.Errorf("read exclude file %s: %w", f, err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				out = append(out, line)
+			}
+		}
+	}
+	return out, nil
 }
 
 func pathExcluded(r *repo.Repository, path string, excludes []string) bool {
