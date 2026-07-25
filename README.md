@@ -70,12 +70,12 @@ qin clone http://example.com/repo myrepo
 
 | 命令 | 说明 |
 |------|------|
-| `init` | 在当前目录初始化新仓库 |
-| `add <file> [--os]` | 暂存文件（`--os` 标记为当前操作系统变体） |
+| `init [<path>]` | 初始化新仓库（默认当前目录） |
+| `add <file> [--os \| --os-match <expr>] [--exclude <glob> \| --exclude @file]` | 暂存文件（`--os` 标记为当前 OS 变体；`--os-match` 指定 OS 表达式；`--exclude` 排除匹配文件，`@file` 从文件读取排除模式） |
 | `rm <file>` | 移除已暂存文件 |
 | `commit -m <msg>` | 从暂存区创建提交 |
 | `status` | 查看工作区状态 |
-| `log [--graph]` | 查看提交历史（`--graph` 分支可视化） |
+| `log [-n <num>] [--graph] [--all]` | 查看提交历史（`--graph` 分支可视化，`--all` 显示所有分支，`-n` 限制条数） |
 | `diff [--cached] [<ref> <ref>]` | 查看文件级别变更 |
 | `cat <hash>` | 打印对象内容 |
 | `ls` | 列出已暂存文件 |
@@ -85,7 +85,7 @@ qin clone http://example.com/repo myrepo
 
 | 命令 | 说明 |
 |------|------|
-| `branch` | 列出、创建或删除分支 |
+| `branch [-d <name>]` | 列出、创建或删除分支 |
 | `switch <branch>` | 切换到已有分支 |
 | `checkout <ref>` | 检出指定提交的文件 |
 | `tag [name]` | 列出或创建标签 |
@@ -100,11 +100,11 @@ qin clone http://example.com/repo myrepo
 | `remote add <name> <url>` | 添加远程仓库 |
 | `remote remove <name>` | 移除远程 |
 | `remote list` | 列出远程 |
-| `push [<remote>]` | 推送本地分支到远程 (默认 origin) |
-| `fetch [<remote>]` | 从远程拉取对象和引用 |
-| `pull [<remote>]` | 拉取并合并远程变更 |
-| `clone [--lazy] [--recursive] <url> <dir>` | 克隆远程仓库 |
-| `serve [--addr <addr>]` | 启动 HTTP 服务器供远程访问 (默认 :8080) |
+| `push [<remote>]` | 推送本地分支到远程（默认 origin） |
+| `fetch [<remote>]` | 从远程拉取对象和引用（默认 origin） |
+| `pull [<remote>]` | 拉取并合并远程变更（默认 origin） |
+| `clone [--lazy] [--recursive] <url> <dir>` | 克隆远程仓库（`--lazy` 跳过 LFS 分块，`--recursive` 同时克隆子模块） |
+| `serve [--addr <addr>] [--base-path <path>]` | 启动 HTTP 服务器（默认 :8080；`--base-path` 多仓库模式） |
 
 ### 高级操作
 
@@ -112,10 +112,13 @@ qin clone http://example.com/repo myrepo
 |------|------|
 | `stash [pop\|list]` | 储藏或恢复工作区变更 |
 | `reset [--soft\|--mixed\|--hard] [<commit>]` | 重置 HEAD/索引/工作区 |
-| `restore [--staged] <file>` | 恢复工作区或索引文件 |
+| `restore [--staged] <file>...` | 恢复工作区或索引文件 |
 | `apply [<patchfile>]` | 应用补丁文件（默认从 stdin 读取） |
 | `config [<key> [<value>]]` | 查看或设置配置项 |
 | `config --unset <key>` | 重置配置项为默认值 |
+| `lost-found` | 列出悬空（不可达）的提交 |
+| `gc` | 清理悬空对象以回收空间 |
+| `version` | 显示版本信息 |
 
 ### 大文件 (LFS)
 
@@ -139,6 +142,18 @@ qin 内建跨平台文件变体支持，可为不同操作系统维护同一文�
 ```bash
 # 添加当前 OS 定制的文件变体
 qin add --os config.ini
+
+# 使用 OS 表达式添加（匹配 win 和 linux）
+qin add --os-match "win,linux" config.ini
+
+# 排除指定 OS
+qin add --os-match "!mac" config.ini
+
+# 排除匹配 glob 的文件
+qin add --exclude "*.log" --exclude "build/" .
+
+# 从文件读取排除模式
+qin add --exclude @.gitignore .
 
 # 查看文件的所有变体
 qin show config.ini
