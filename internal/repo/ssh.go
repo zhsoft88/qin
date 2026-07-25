@@ -144,7 +144,7 @@ func (r *Repository) sshCollectMissing(host, repoPath string, hash core.Hash) (m
 
 		commit, err := r.LoadCommit(h)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\r  warning: commit %s missing, skipping\n", h.Short())
+			fmt.Fprintf(os.Stderr, "\rwarning: commit %s missing, skipping\n", h.Short())
 			return nil
 		}
 
@@ -175,7 +175,7 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 
 	tree, err := r.LoadTree(treeHash)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\r  warning: tree %s missing, skipping\n", treeHash.Short())
+		fmt.Fprintf(os.Stderr, "\rwarning: tree %s missing, skipping\n", treeHash.Short())
 		return nil
 	}
 	set[treeHash] = true
@@ -188,7 +188,7 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
 			// Object missing locally — skip it
-			fmt.Fprintf(os.Stderr, "\r  warning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
+			fmt.Fprintf(os.Stderr, "\rwarning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
 			continue
 		}
 
@@ -207,7 +207,7 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 			set[entry.Hash] = true
 		}
 		if len(set)%5000 < 10 {
-			fmt.Fprintf(os.Stderr, "  scanning: %d objects...", len(set))
+			fmt.Fprintf(os.Stderr, "scanning: %d objects...", len(set))
 		}
 	}
 
@@ -254,7 +254,7 @@ func (r *Repository) fetchSSH(host, repoPath, remoteName string) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d", i, total)
+			fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d", i, total)
 		}
 		data, err := sshReadObject(host, repoPath, h)
 		if err != nil {
@@ -278,7 +278,7 @@ func (r *Repository) fetchSSH(host, repoPath, remoteName string) error {
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d done\n", i, total)
+		fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d done\n", i, total)
 	}
 
 	// Write remote-tracking refs
@@ -327,7 +327,7 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d", i, total)
+			fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d", i, total)
 		}
 		data, err := ioutil.ReadFile(r.objectPath(h))
 		if err != nil {
@@ -338,7 +338,7 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string) error {
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
+		fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d done\n", i, total)
 	}
 
 	// Update refs
@@ -457,7 +457,7 @@ func (r *Repository) sshCollectRemoteTree(host, repoPath string, treeHash core.H
 
 			if eType == core.ObjectChunkManifest {
 				// Object missing locally — skip it
-				fmt.Fprintf(os.Stderr, "\r  warning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
+				fmt.Fprintf(os.Stderr, "\rwarning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
 				var manifest ChunkManifest
 				if err := core.DeserializeJSON(eContent, &manifest); err != nil {
 					return err

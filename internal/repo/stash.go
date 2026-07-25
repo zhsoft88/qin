@@ -155,27 +155,34 @@ func (r *Repository) StashPop() error {
 			return fmt.Errorf("create directory for %s: %w", name, err)
 		}
 
-		objType, _, err := r.LoadObject(winner.Hash)
-		if err != nil {
-			return fmt.Errorf("load object %s: %w", winner.Hash.Short(), err)
-		}
-
+		// Empty directory entries have zero hash - create dir, skip file write
 		var fileData []byte
-		if objType == core.ObjectChunkManifest {
-			fileData, err = r.LoadChunkedFile(winner.Hash)
-			if err != nil {
-				return fmt.Errorf("load chunked file %s: %w", name, err)
+		if winner.Hash.IsZero() {
+			if err := os.MkdirAll(fullPath, 0755); err != nil {
+				return fmt.Errorf("create dir %s: %w", name, err)
 			}
 		} else {
-			_, blobData, err := r.LoadObject(winner.Hash)
+			objType, _, err := r.LoadObject(winner.Hash)
 			if err != nil {
-				return fmt.Errorf("load blob %s: %w", name, err)
+				return fmt.Errorf("load object %s: %w", winner.Hash.Short(), err)
 			}
-			fileData = blobData
-		}
 
-		if err := writeFileFromEntry(fullPath, fileData, winner.Mode); err != nil {
-			return fmt.Errorf("write %s: %w", name, err)
+			if objType == core.ObjectChunkManifest {
+				fileData, err = r.LoadChunkedFile(winner.Hash)
+				if err != nil {
+					return fmt.Errorf("load chunked file %s: %w", name, err)
+				}
+			} else {
+				_, blobData, err := r.LoadObject(winner.Hash)
+				if err != nil {
+					return fmt.Errorf("load blob %s: %w", name, err)
+				}
+				fileData = blobData
+			}
+
+			if err := writeFileFromEntry(fullPath, fileData, winner.Mode); err != nil {
+				return fmt.Errorf("write %s: %w", name, err)
+			}
 		}
 
 		// Add all OS variants to index (default + OS-specific)

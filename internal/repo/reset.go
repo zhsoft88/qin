@@ -124,6 +124,16 @@ func (r *Repository) writeTreeEntryToDisk(name string, entry TreeEntry) error {
 		return fmt.Errorf("create directory for %s: %w", name, err)
 	}
 
+	// Empty directory entries have zero hash — create dir and skip
+	if entry.Hash.IsZero() {
+		return os.MkdirAll(fullPath, 0755)
+	}
+
+	// Empty directory entries have zero hash - create dir and skip
+	if entry.Hash.IsZero() {
+		return os.MkdirAll(fullPath, 0755)
+	}
+
 	objType, _, err := r.LoadObject(entry.Hash)
 	if err != nil {
 		return fmt.Errorf("load object %s: %w", entry.Hash.Short(), err)

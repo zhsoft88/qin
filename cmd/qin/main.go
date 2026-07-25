@@ -190,11 +190,11 @@ func runAdd(args []string) error {
 	for _, f := range fs.Args() {
 		if useOSExpr != "" {
 			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags, &added, idx, ignorer); err != nil {
-				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
+				fmt.Fprintf(os.Stderr, "add %s: %v\n", f, err)
 			}
 		} else {
 			if err := addFileOrDir(r, f, excludeFlags, &added, idx, ignorer); err != nil {
-				fmt.Fprintf(os.Stderr, "  add %s: %v\n", f, err)
+				fmt.Fprintf(os.Stderr, "add %s: %v\n", f, err)
 			}
 		}
 	}
@@ -303,7 +303,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			}
 		}
 		if err := addFileOrDir(r, childPath, excludes, added, idx, ignorer); err != nil {
-			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
+			fmt.Fprintf(os.Stderr, "add %s: %v\n", childPath, err)
 		}
 	}
 	return nil
@@ -429,7 +429,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			}
 		}
 		if err := addFileOrDirExpr(r, childPath, expr, excludes, added, idx, ignorer); err != nil {
-			fmt.Fprintf(os.Stderr, "  add %s: %v\n", childPath, err)
+			fmt.Fprintf(os.Stderr, "add %s: %v\n", childPath, err)
 		}
 	}
 	return nil
@@ -582,10 +582,10 @@ func runRm(args []string) error {
 	}
 	for _, f := range args {
 		if err := r.RemoveFile(f); err != nil {
-			fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
+			fmt.Fprintf(os.Stderr, "rm %s: %v\n", f, err)
 			continue
 		}
-		fmt.Printf("  removed: %s\n", f)
+		fmt.Printf("removed: %s\n", f)
 	}
 	return nil
 }
@@ -672,7 +672,7 @@ func runLog(args []string) error {
 		fmt.Printf("commit %s\n", h)
 		fmt.Printf("Author: %s\n", commit.Author)
 		fmt.Printf("Date:   %s\n\n", commit.Time.Format(time.RFC1123))
-		fmt.Printf("    %s\n\n", commit.Message)
+		fmt.Printf("  %s\n\n", commit.Message)
 		if len(commit.Parents) > 0 {
 			h = commit.Parents[0]
 		} else {
@@ -739,25 +739,25 @@ func runStatus(args []string) error {
 			} else {
 				osTag = " [*]"
 			}
-			fmt.Printf("  %-20s %s bytes  %s%s\n", p, humanSize(entry.Size), entry.Hash.Short(), osTag)
+			fmt.Printf("%-20s %s bytes  %s%s\n", p, humanSize(entry.Size), entry.Hash.Short(), osTag)
 		}
 	}
 	if len(s.Modified) > 0 {
 		fmt.Printf("\nmodified files: (%d)\n", len(s.Modified))
 		for _, p := range s.Modified {
-			fmt.Printf("  %s (needs re-staging)\n", p)
+			fmt.Printf("%s (needs re-staging)\n", p)
 		}
 	}
 	if len(s.Deleted) > 0 {
 		fmt.Printf("\ndeleted files: (%d)\n", len(s.Deleted))
 		for _, p := range s.Deleted {
-			fmt.Printf("  %s\n", p)
+			fmt.Printf("%s\n", p)
 		}
 	}
 	if len(s.Untracked) > 0 {
 		fmt.Printf("\nuntracked files: (%d)\n", len(s.Untracked))
 		for _, p := range s.Untracked {
-			fmt.Printf("  %s\n", p)
+			fmt.Printf("%s\n", p)
 		}
 	}
 	if len(s.Staged) == 0 && len(s.Modified) == 0 && len(s.Deleted) == 0 && len(s.Untracked) == 0 {
@@ -863,7 +863,7 @@ func runBranch(args []string) error {
 			if b == current {
 				fmt.Printf("* %s\n", b)
 			} else {
-				fmt.Printf("  %s\n", b)
+				fmt.Printf("%s\n", b)
 			}
 		}
 		return nil
@@ -1025,7 +1025,7 @@ func runMerge(args []string) error {
 		if result != nil && len(result.Conflicts) > 0 {
 			fmt.Fprintf(os.Stderr, "merge conflicts in %d files:\n", len(result.Conflicts))
 			for _, name := range result.Conflicts {
-				fmt.Fprintf(os.Stderr, "  %s (see %s.ours, %s.theirs, %s.base)\n", name, name, name, name)
+				fmt.Fprintf(os.Stderr, "%s (see %s.ours, %s.theirs, %s.base)\n", name, name, name, name)
 			}
 			fmt.Fprintln(os.Stderr, "resolve conflicts and commit")
 			return nil
@@ -1205,7 +1205,7 @@ func runPull(args []string) error {
 		if result != nil && len(result.Conflicts) > 0 {
 			fmt.Fprintf(os.Stderr, "pull conflicts in %d files:\n", len(result.Conflicts))
 			for _, name := range result.Conflicts {
-				fmt.Fprintf(os.Stderr, "  %s\n", name)
+				fmt.Fprintf(os.Stderr, "%s\n", name)
 			}
 			return nil
 		}
@@ -1327,14 +1327,14 @@ func runLfsPull(args []string) error {
 			}
 			fmt.Printf("pulling %s...\n", f.Path)
 			if err := r.LfsPull(remote, f.Path); err != nil {
-				fmt.Fprintf(os.Stderr, "  pull %s: %v\n", f.Path, err)
+				fmt.Fprintf(os.Stderr, "pull %s: %v\n", f.Path, err)
 			}
 		}
 		return nil
 	}
 	for _, file := range targets {
 		if err := r.LfsPull(remote, file); err != nil {
-			fmt.Fprintf(os.Stderr, "  pull %s: %v\n", file, err)
+			fmt.Fprintf(os.Stderr, "pull %s: %v\n", file, err)
 			continue
 		}
 		fmt.Printf("pulled: %s\n", file)
@@ -1563,16 +1563,16 @@ func runRestore(args []string) error {
 	for _, f := range files {
 		if staged {
 			if err := r.RestoreStaged(f); err != nil {
-				fmt.Fprintf(os.Stderr, "  restore --staged %s: %v\n", f, err)
+				fmt.Fprintf(os.Stderr, "restore --staged %s: %v\n", f, err)
 				continue
 			}
-			fmt.Printf("  unstaged: %s\n", f)
+			fmt.Printf("unstaged: %s\n", f)
 		} else {
 			if err := r.RestoreFile(f); err != nil {
-				fmt.Fprintf(os.Stderr, "  restore %s: %v\n", f, err)
+				fmt.Fprintf(os.Stderr, "restore %s: %v\n", f, err)
 				continue
 			}
-			fmt.Printf("  restored: %s\n", f)
+			fmt.Printf("restored: %s\n", f)
 		}
 	}
 	return nil
@@ -1644,17 +1644,17 @@ func runSubmodule(args []string) error {
 			_, statErr := os.Stat(subPath)
 			if os.IsNotExist(statErr) {
 				if !initFlag {
-					fmt.Printf("  %s: not cloned (use --init to clone)\n", path)
+					fmt.Printf("%s: not cloned (use --init to clone)\n", path)
 					continue
 				}
-				fmt.Printf("  init %s...\n", path)
+				fmt.Printf("init %s...\n", path)
 				if err := repo.AddSubmodule(r, def.URL, path); err != nil {
-					fmt.Fprintf(os.Stderr, "  init %s: %v\n", path, err)
+					fmt.Fprintf(os.Stderr, "init %s: %v\n", path, err)
 					continue
 				}
-				fmt.Printf("  %s: cloned\n", path)
+				fmt.Printf("%s: cloned\n", path)
 			} else {
-				fmt.Printf("  update %s...\n", path)
+				fmt.Printf("update %s...\n", path)
 			}
 		}
 	case "status":
@@ -1674,9 +1674,9 @@ func runSubmodule(args []string) error {
 			subPath := filepath.Join(r.Path, path)
 			_, statErr := os.Stat(filepath.Join(subPath, ".qin"))
 			if os.IsNotExist(statErr) {
-				fmt.Printf("  %s -> %s (not initialized)\n", path, def.URL)
+				fmt.Printf("%s -> %s (not initialized)\n", path, def.URL)
 			} else {
-				fmt.Printf("  %s -> %s\n", path, def.URL)
+				fmt.Printf("%s -> %s\n", path, def.URL)
 			}
 		}
 	default:
@@ -1708,9 +1708,9 @@ func cloneSubmodules(r *repo.Repository) error {
 		return err
 	}
 	for path, def := range mods.Submodules {
-		fmt.Printf("  cloning submodule %s...\n", path)
+		fmt.Printf("cloning submodule %s...\n", path)
 		if err := repo.AddSubmodule(r, def.URL, path); err != nil {
-			fmt.Fprintf(os.Stderr, "  clone submodule %s: %v\n", path, err)
+			fmt.Fprintf(os.Stderr, "clone submodule %s: %v\n", path, err)
 			continue
 		}
 	}
@@ -1733,18 +1733,18 @@ func runLostFound(args []string) error {
 	fmt.Printf("dangling commits: (%d)\n", len(commits))
 	fmt.Println()
 	for _, c := range commits {
-		fmt.Printf("  commit %s\n", c.Hash)
-		fmt.Printf("  Author: %s\n", c.Author)
-		fmt.Printf("  Date:   %s\n", c.Time.Format("Mon Jan 2 15:04:05 2006"))
+		fmt.Printf("commit %s\n", c.Hash)
+		fmt.Printf("Author: %s\n", c.Author)
+		fmt.Printf("Date:   %s\n", c.Time.Format("Mon Jan 2 15:04:05 2006"))
 		if c.Parents > 0 {
-			fmt.Printf("  Parents: %d\n", c.Parents)
+			fmt.Printf("Parents: %d\n", c.Parents)
 		} else {
-			fmt.Println("  Parents: 0 (root commit)")
+			fmt.Println("Parents: 0 (root commit)")
 		}
 		fmt.Printf("\n      %s\n\n", c.Message)
 	}
-	fmt.Println("  ---")
-	fmt.Println("  To recover: use lo checkout <hash> then lo branch <name>")
+	fmt.Println("---")
+	fmt.Println("To recover: use lo checkout <hash> then lo branch <name>")
 	return nil
 }
 

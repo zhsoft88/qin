@@ -175,9 +175,9 @@ func (r *Repository) ApplyPatch(data []byte) error {
 			}
 
 			if op == '+' {
-				fmt.Printf("  added: %s\n", cleanPath)
+				fmt.Printf("added: %s\n", cleanPath)
 			} else {
-				fmt.Printf("  modified: %s\n", cleanPath)
+				fmt.Printf("modified: %s\n", cleanPath)
 			}
 
 			// Update index
@@ -220,7 +220,7 @@ func (r *Repository) ApplyPatch(data []byte) error {
 				}
 			}
 
-			fmt.Printf("  deleted: %s\n", cleanPath)
+			fmt.Printf("deleted: %s\n", cleanPath)
 
 			// Consume separator
 			for scanner.Scan() {

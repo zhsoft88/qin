@@ -201,7 +201,7 @@ func (r *Repository) httpCollectTree(baseURL string, treeHash core.Hash, lazy bo
 				set[entry.Hash] = true
 			}
 			if len(set)%5000 < 10 {
-				fmt.Fprintf(os.Stderr, "\r  scanning: %d objects...", len(set))
+				fmt.Fprintf(os.Stderr, "\rscanning: %d objects...", len(set))
 			}
 		}
 		return nil
@@ -247,7 +247,7 @@ func (r *Repository) fetchHTTP(baseURL, remoteName string, lazy bool) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d", i, total)
+			fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d", i, total)
 		}
 		data, err := httpReadObject(baseURL, h)
 		if err != nil {
@@ -272,7 +272,7 @@ func (r *Repository) fetchHTTP(baseURL, remoteName string, lazy bool) error {
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d done\n", i, total)
+		fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d done\n", i, total)
 	}
 
 	// Write remote-tracking refs
@@ -324,7 +324,7 @@ func (r *Repository) pushHTTP(baseURL, remoteName string) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d", i, total)
+			fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d", i, total)
 		}
 		data, err := ioutil.ReadFile(r.objectPath(h))
 		if err != nil {
@@ -335,7 +335,7 @@ func (r *Repository) pushHTTP(baseURL, remoteName string) error {
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
+		fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d done\n", i, total)
 	}
 
 	// Update remote refs
@@ -367,7 +367,7 @@ func (r *Repository) httpCollectMissingWithBoundary(baseURL string, hash core.Ha
 
 		commit, err := r.LoadCommit(h)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\r  warning: commit %s missing, skipping\n", h.Short())
+			fmt.Fprintf(os.Stderr, "\rwarning: commit %s missing, skipping\n", h.Short())
 			return nil
 		}
 
@@ -399,7 +399,7 @@ func (r *Repository) collectTreeHTTPBoundary(baseURL string, set map[core.Hash]b
 
 	tree, err := r.LoadTree(treeHash)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\r  warning: tree %s missing, skipping\n", treeHash.Short())
+		fmt.Fprintf(os.Stderr, "\rwarning: tree %s missing, skipping\n", treeHash.Short())
 		return nil
 	}
 
@@ -413,7 +413,7 @@ func (r *Repository) collectTreeHTTPBoundary(baseURL string, set map[core.Hash]b
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
 			// Object missing locally — skip it
-			fmt.Fprintf(os.Stderr, "\r  warning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
+			fmt.Fprintf(os.Stderr, "\rwarning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
 			continue
 		}
 

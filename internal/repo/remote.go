@@ -184,7 +184,7 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 	for i, chunk := range manifest.Chunks {
 		if !r.HasObject(chunk.Hash) {
 			if total > 1 {
-				fmt.Fprintf(os.Stderr, "\r  pulling chunks: %d/%d", i+1, total)
+				fmt.Fprintf(os.Stderr, "\r pulling chunks: %d/%d", i+1, total)
 			}
 			if err := r.copyObjectFromRemote(remoteURL, chunk.Hash); err != nil {
 				return fmt.Errorf("copy chunk %s: %w", chunk.Hash.Short(), err)
@@ -193,7 +193,7 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 		}
 	}
 	if total > 1 && downloaded > 0 {
-		fmt.Fprintf(os.Stderr, "\r  pulled %d chunk(s)\n", downloaded)
+		fmt.Fprintf(os.Stderr, "\rpulled %d chunk(s)\n", downloaded)
 	}
 
 	// Reconstruct and write real file content
@@ -244,7 +244,7 @@ func (r *Repository) collectObjects(boundary *Repository, hash core.Hash, lazy b
 
 		commit, err := r.LoadCommit(h)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\r  warning: commit %s missing, skipping\n", h.Short())
+			fmt.Fprintf(os.Stderr, "\rwarning: commit %s missing, skipping\n", h.Short())
 			return nil
 		}
 
@@ -277,7 +277,7 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 
 	tree, err := r.LoadTree(treeHash)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\r  warning: tree %s missing, skipping\n", treeHash.Short())
+		fmt.Fprintf(os.Stderr, "\rwarning: tree %s missing, skipping\n", treeHash.Short())
 		return nil
 	}
 
@@ -296,7 +296,7 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
 			// Object missing locally — skip it
-			fmt.Fprintf(os.Stderr, "\r  warning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
+			fmt.Fprintf(os.Stderr, "\rwarning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
 			continue
 		}
 
@@ -317,7 +317,7 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 			set[entry.Hash] = true
 		}
 		if len(set)%5000 < 10 {
-			fmt.Fprintf(os.Stderr, "\r  scanning: %d objects...", len(set))
+			fmt.Fprintf(os.Stderr, "\rscanning: %d objects...", len(set))
 		}
 		
 	}
@@ -478,14 +478,14 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d", i, total)
+			fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d", i, total)
 		}
 		if err := copyObject(remoteRepo, r, h); err != nil {
 			return fmt.Errorf("copy object %s: %w", h.Short(), err)
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\r  fetching objects: %d/%d done\n", i, total)
+		fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d done\n", i, total)
 	}
 
 	for branchName, hash := range branchRefs {
@@ -557,20 +557,20 @@ func (r *Repository) Push(remoteName string) error {
 		return nil
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\r  found %d objects to push\n", total)
+		fmt.Fprintf(os.Stderr, "\rfound %d objects to push\n", total)
 	}
 	i := 0
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d", i, total)
+			fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d", i, total)
 		}
 		if err := copyObject(r, remoteRepo, h); err != nil {
 			return fmt.Errorf("copy object %s: %w", h.Short(), err)
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\r  pushing objects: %d/%d done\n", i, total)
+		fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d done\n", i, total)
 	}
 	fmt.Fprintf(os.Stderr, "pushed to %s\n", remoteName)
 

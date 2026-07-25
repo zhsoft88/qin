@@ -110,6 +110,30 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 			continue
 		}
 
+		// Empty directory entries have zero hash — create dir and skip
+		if winner.Hash.IsZero() {
+			if err := os.MkdirAll(fullPath, 0755); err != nil {
+				return fmt.Errorf("create dir %s: %w", name, err)
+			}
+			newIndex.Entries[entryKey(name, osIDForKey(winner.OSS))] = IndexEntry{
+				Mode: DirMode,
+				OSS:  winner.OSS,
+			}
+			continue
+		}
+
+		// Empty directory entries have zero hash - create dir and skip
+		if winner.Hash.IsZero() {
+			if err := os.MkdirAll(fullPath, 0755); err != nil {
+				return fmt.Errorf("create dir %s: %w", name, err)
+			}
+			newIndex.Entries[entryKey(name, osIDForKey(winner.OSS))] = IndexEntry{
+				Mode: DirMode,
+				OSS:  winner.OSS,
+			}
+			continue
+		}
+
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 			return fmt.Errorf("create directory for %s: %w", name, err)
 		}
