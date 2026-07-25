@@ -84,7 +84,7 @@ func main() {
 func usage() {
 	fmt.Println(`Usage: lo <command> [options]
 Commands:
-  init              Initialize a new repository
+  init [<path>]     Initialize a new repository (default: current dir)
   add <file>        Stage file(s) [--os | --os-match <expr>] [--exclude <glob>]
   rm <file>         Remove staged file(s)
   commit            Create a commit from staged files
@@ -125,10 +125,18 @@ OS identifiers: win, mac, linux, freebsd, netbsd, openbsd, dragonfly, solaris, a
 }
 // ---- init ----
 func runInit(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	path := fs.String("path", ".", "repository path")
-	fs.Parse(args)
-	r, err := repo.Init(*path)
+	path := "."
+	if len(args) > 0 && args[0] != "" {
+		path = args[0]
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(abs, 0755); err != nil {
+		return fmt.Errorf("create directory: %w", err)
+	}
+	r, err := repo.Init(abs)
 	if err != nil {
 		return err
 	}
