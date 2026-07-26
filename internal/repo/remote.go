@@ -685,6 +685,7 @@ func (r *Repository) Pull(remoteName string) (*MergeResult, error) {
 	}
 
 	// Step 4: Merge
+	fmt.Fprintf(os.Stderr, "merging...\n")
 	return r.mergeCommit(hash, remoteName+"/"+branch)
 }
 
