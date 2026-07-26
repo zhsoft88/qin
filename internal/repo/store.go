@@ -152,15 +152,21 @@ func (r *Repository) objectPath(hash core.Hash) string {
 // ObjectType reads the type of a stored object by peeking at the first
 // byte of the uncompressed header without fully decompressing the content.
 func (r *Repository) ObjectType(hash core.Hash) (core.ObjectType, error) {
-	data, err := ioutil.ReadFile(r.objectPath(hash))
+	f, err := os.Open(r.objectPath(hash))
 	if err != nil {
 		return 0, err
 	}
-	if len(data) == 0 {
+	defer f.Close()
+	var header [512]byte
+	n, err := f.Read(header[:])
+	if err != nil && err != io.EOF {
+		return 0, err
+	}
+	if n == 0 {
 		return 0, fmt.Errorf("object file is empty (corrupt): %s", hash)
 	}
 
-	gr, err := gzip.NewReader(bytes.NewReader(data))
+	gr, err := gzip.NewReader(bytes.NewReader(header[:n]))
 	if err != nil {
 		return 0, fmt.Errorf("decompress header: %w", err)
 	}
