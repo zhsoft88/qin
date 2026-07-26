@@ -344,7 +344,21 @@ func (r *Repository) RemoveFile(filePath string) error {
 		}
 	}
 	if keyToDelete == "" {
-		return fmt.Errorf("file not tracked: %s", filePath)
+		// No exact match — try removing all files under this directory prefix
+		var prefixKeys []string
+		for key := range idx.Entries {
+			if path, _ := parseKey(key); path == relFormatted || strings.HasPrefix(path, relFormatted+"/") {
+				prefixKeys = append(prefixKeys, key)
+			}
+		}
+		if len(prefixKeys) == 0 {
+			return fmt.Errorf("file not tracked: %s", filePath)
+		}
+		for _, key := range prefixKeys {
+			delete(idx.Entries, key)
+		}
+		fmt.Printf("removed %d file(s) from index\n", len(prefixKeys))
+		return r.SaveIndex(idx)
 	}
 
 	delete(idx.Entries, keyToDelete)

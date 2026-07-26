@@ -73,7 +73,7 @@ qin clone http://example.com/repo myrepo
 | `init [<path>]` | 初始化新仓库（默认当前目录） |
 | `add <file> [--os \| --os-match <expr>] [--exclude <glob> \| --exclude @file]` | 暂存文件（`--os` 标记为当前 OS 变体；`--os-match` 指定 OS 表达式；`--exclude` 排除匹配文件，`@file` 从文件读取排除模式） |
 | `rm <file>` | 移除已暂存文件 |
-| `commit -m <msg>` | 从暂存区创建提交 |
+| `commit [-a] -m <msg>` | 从暂存区创建提交（`-a` 自动暂存所有修改后提交） |
 | `status` | 查看工作区状态 |
 | `log [-n <num>] [--graph] [--all]` | 查看提交历史（`--graph` 分支可视化，`--all` 显示所有分支，`-n` 限制条数） |
 | `diff [--cached] [<ref> <ref>]` | 查看文件级别变更 |

@@ -85,9 +85,9 @@ func usage() {
 	fmt.Println(`Usage: qin <command> [options]
 Commands:
   init [<path>]     Initialize a new repository (default: current dir)
-  add <file|@file>  Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
+  add <file|@file>  Stage file(s) [-A] [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
   rm <file>         Remove staged file(s)
-  commit            Create a commit from staged files
+  commit [-a]       Create a commit from staged files (-a to auto-stage modified)
   log [--graph]     Show commit history (--graph for branch visualization)
   status            Show working tree status
   cat <hash>        Print an object
@@ -146,14 +146,15 @@ func runInit(args []string) error {
 // ---- add ----
 func runAdd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
+	allFlag := fs.Bool("A", false, "add all files from the working tree")
 	osFlag := fs.Bool("os", false, "tag file(s) with current OS")
 	osMatchFlag := fs.String("os-match", "", "tag file(s) with OS expression (e.g., win, !win, win,linux)")
 	var excludeFlags stringSlice
 	fs.Var(&excludeFlags, "exclude", "exclude files matching glob pattern (repeatable)")
 	args = reorderFlags(args)
 	fs.Parse(args)
-	if fs.NArg() == 0 {
-		return fmt.Errorf("usage: qin add [--os] [--os-match <expr>] [--exclude <glob>] <file|@file> [file...]")
+	if fs.NArg() == 0 && !*allFlag {
+		return fmt.Errorf("usage: qin add [-A] [--os] [--os-match <expr>] [--exclude <glob>] <file|@file> [file...]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -187,8 +188,14 @@ func runAdd(args []string) error {
 		return err
 	}
 
+	// With -A, add all files in the working tree
+	fileArgs := fs.Args()
+	if *allFlag {
+		fileArgs = append(fileArgs, ".")
+	}
+
 	// Expand @file references in arguments: each @file is replaced by lines from that file
-	fileArgs, err := expandAtFiles(fs.Args(), r.Path)
+	fileArgs, err = expandAtFiles(fileArgs, r.Path)
 	if err != nil {
 		return err
 	}
@@ -216,11 +223,11 @@ func runAdd(args []string) error {
 }
 // addFileOrDir adds a file or directory recursively (default OS).
 func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
-	fi, err := os.Stat(path)
+	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	if !fi.IsDir() {
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
@@ -298,7 +305,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		return nil
 	}
 	for _, entry := range entries {
-		if entry.Name() == ".lo" || entry.Name() == ".qinignore" {
+		if entry.Name() == repo.LoDir || entry.Name() == ".qinignore" {
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
@@ -317,11 +324,11 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 }
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
 func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
-	fi, err := os.Stat(path)
+	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	if !fi.IsDir() {
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
@@ -424,7 +431,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		return nil
 	}
 	for _, entry := range entries {
-		if entry.Name() == ".lo" || entry.Name() == ".qinignore" {
+		if entry.Name() == repo.LoDir || entry.Name() == ".qinignore" {
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
@@ -625,6 +632,7 @@ func runCommit(args []string) error {
 	fs := flag.NewFlagSet("commit", flag.ExitOnError)
 	msg := fs.String("m", "", "commit message")
 	author := fs.String("author", "", "author (default: from config)")
+	allFlag := fs.Bool("a", false, "commit all modified files")
 	fs.Parse(args)
 	if *msg == "" {
 		return fmt.Errorf("commit message required (-m)")
@@ -633,6 +641,30 @@ func runCommit(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	if *allFlag {
+		// Stage all modified/untracked files first (like add -A)
+		idx, err := r.LoadIndex()
+		if err != nil {
+			return err
+		}
+		ignorer, err := r.LoadIgnoreMatcher()
+		if err != nil {
+			return err
+		}
+		added := 0
+		if err := addFileOrDir(r, ".", nil, &added, idx, ignorer); err != nil {
+			return fmt.Errorf("stage files: %w", err)
+		}
+		if added > 0 {
+			if err := r.SaveIndex(idx); err != nil {
+				return err
+			}
+			clearLine()
+			fmt.Printf("staged %d file(s)\n", added)
+		}
+	}
+
 	auth := *author
 	if auth == "" {
 		cfg, _ := repo.LoadConfig(r.Path)
