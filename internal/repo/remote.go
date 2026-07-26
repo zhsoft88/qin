@@ -584,9 +584,71 @@ func (r *Repository) Push(remoteName string) error {
 	return nil
 }
 
-// Pull fetches from the remote and merges the remote-tracking ref into HEAD.
+// collectOSChunks walks the commit tree and collects chunk blob hashes
+// that are needed for the current OS but not yet present locally.
+func (r *Repository) collectOSChunks(commitHash core.Hash) (map[core.Hash]bool, error) {
+	needed := make(map[core.Hash]bool)
+	cOS := currentOS()
+
+	var walkTree func(th core.Hash) error
+	walkTree = func(th core.Hash) error {
+		tree, err := r.LoadTree(th)
+		if err != nil {
+			return nil // skip missing trees
+		}
+		for _, entry := range tree.Entries {
+			// Skip entries not visible on current OS
+			if !osMatch(entry.OSS, cOS) {
+				continue
+			}
+			if IsSubmoduleMode(entry.Mode) || entry.Hash.IsZero() {
+				continue
+			}
+			// Recurse into subtrees regardless of whether the tree object is local
+			objType, err := r.ObjectType(entry.Hash)
+			if err == nil && objType == core.ObjectTree {
+				walkTree(entry.Hash)
+				continue
+			}
+			// For non-tree entries, skip if already local or not a chunk manifest
+			if r.HasObject(entry.Hash) {
+				continue
+			}
+			if objType == core.ObjectChunkManifest {
+				manifest, err := r.LoadChunkManifest(entry.Hash)
+				if err != nil {
+					continue
+				}
+				for _, chunk := range manifest.Chunks {
+					if !chunk.Hash.IsZero() && !r.HasObject(chunk.Hash) {
+						needed[chunk.Hash] = true
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	commit, err := r.LoadCommit(commitHash)
+	if err != nil {
+		return nil, err
+	}
+	if err := walkTree(commit.Tree); err != nil {
+		return nil, err
+	}
+	return needed, nil
+}
+
+// Pull fetches lightweight data first, then selectively pulls chunk blobs
+// needed for the current OS, then merges.
 func (r *Repository) Pull(remoteName string) (*MergeResult, error) {
-	if err := r.Fetch(remoteName); err != nil {
+	remoteURL, err := r.LoadRemote(remoteName)
+	if err != nil {
+		return nil, fmt.Errorf("remote not found: %s", remoteName)
+	}
+
+	// Step 1: Lightweight fetch — manifests and small files only, no chunk blobs
+	if err := r.fetch(remoteName, true); err != nil {
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
 
@@ -605,6 +667,32 @@ func (r *Repository) Pull(remoteName string) (*MergeResult, error) {
 		return nil, err
 	}
 
+	// Step 2: Collect chunk hashes needed for current OS
+	needed, err := r.collectOSChunks(hash)
+	if err != nil {
+		return nil, fmt.Errorf("collect needed chunks: %w", err)
+	}
+
+	// Step 3: Fetch only those chunk blobs from remote
+	total := len(needed)
+	if total > 0 {
+		fmt.Fprintf(os.Stderr, "pulling %d large file chunks...\n", total)
+		i := 0
+		for h := range needed {
+			i++
+			if total > 1 {
+				fmt.Fprintf(os.Stderr, "\r  chunks: %d/%d", i, total)
+			}
+			if err := r.copyObjectFromRemote(remoteURL, h); err != nil {
+				fmt.Fprintf(os.Stderr, "\nwarning: failed to fetch chunk %s: %s\n", h.Short(), err)
+			}
+		}
+		if total > 1 {
+			fmt.Fprintf(os.Stderr, "\r  chunks: %d/%d done\n", i, total)
+		}
+	}
+
+	// Step 4: Merge
 	return r.mergeCommit(hash, remoteName+"/"+branch)
 }
 
