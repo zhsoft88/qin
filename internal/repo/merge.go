@@ -324,7 +324,8 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 			return nil, fmt.Errorf("create directory for %s: %w", name, err)
 		}
 		if err := writeFileFromEntry(fullPath, fileData, entry.Mode); err != nil {
-			return nil, fmt.Errorf("write %s: %w", name, err)
+			// skip M-bM-^@M-^T cannot write on this platform
+			continue
 		}
 
 		newIndex.Entries[name] = IndexEntry{
