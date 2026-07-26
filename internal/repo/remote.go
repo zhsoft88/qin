@@ -589,57 +589,43 @@ func (r *Repository) Push(remoteName string) error {
 func (r *Repository) collectOSChunks(commitHash core.Hash) (map[core.Hash]bool, error) {
 	needed := make(map[core.Hash]bool)
 	cOS := currentOS()
-	scanned := 0
-
-	var walkTree func(th core.Hash) error
-	walkTree = func(th core.Hash) error {
-		tree, err := r.LoadTree(th)
-		if err != nil {
-			return nil // skip missing trees
-		}
-		for _, entry := range tree.Entries {
-			// Skip entries not visible on current OS
-			if !osMatch(entry.OSS, cOS) {
-				continue
-			}
-			if IsSubmoduleMode(entry.Mode) || entry.Hash.IsZero() {
-				continue
-			}
-			scanned++
-			if scanned%10000 == 0 {
-				fmt.Fprintf(os.Stderr, "\r  scanning tree: %d entries...", scanned)
-			}
-			// Recurse into subtrees regardless of whether the tree object is local
-			objType, err := r.ObjectType(entry.Hash)
-			if err == nil && objType == core.ObjectTree {
-				walkTree(entry.Hash)
-				continue
-			}
-			// For non-tree entries, skip if already local or not a chunk manifest
-			if r.HasObject(entry.Hash) {
-				continue
-			}
-			if objType == core.ObjectChunkManifest {
-				manifest, err := r.LoadChunkManifest(entry.Hash)
-				if err != nil {
-					continue
-				}
-				for _, chunk := range manifest.Chunks {
-					if !chunk.Hash.IsZero() && !r.HasObject(chunk.Hash) {
-						needed[chunk.Hash] = true
-					}
-				}
-			}
-		}
-		return nil
-	}
 
 	commit, err := r.LoadCommit(commitHash)
 	if err != nil {
 		return nil, err
 	}
-	if err := walkTree(commit.Tree); err != nil {
+	tree, err := r.LoadTree(commit.Tree)
+	if err != nil {
 		return nil, err
+	}
+	chunkThreshold := int64(r.Config.Core.ChunkThreshold)
+	for i, entry := range tree.Entries {
+		if !osMatch(entry.OSS, cOS) {
+			continue
+		}
+		if IsSubmoduleMode(entry.Mode) || entry.Hash.IsZero() {
+			continue
+		}
+		if i%10000 == 0 {
+			fmt.Fprintf(os.Stderr, "  scanning tree: %d/%d entries...", i, len(tree.Entries))
+		}
+		// Files below chunk threshold are never stored as chunk manifests
+		if entry.Size < chunkThreshold {
+			continue
+		}
+		objType, err := r.ObjectType(entry.Hash)
+		if err != nil || objType != core.ObjectChunkManifest {
+			continue
+		}
+		manifest, err := r.LoadChunkManifest(entry.Hash)
+		if err != nil {
+			continue
+		}
+		for _, chunk := range manifest.Chunks {
+			if !chunk.Hash.IsZero() && !r.HasObject(chunk.Hash) {
+				needed[chunk.Hash] = true
+			}
+		}
 	}
 	return needed, nil
 }
