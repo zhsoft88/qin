@@ -300,6 +300,14 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 			continue
 		}
 
+		if entry.Hash.IsZero() {
+			if err := os.MkdirAll(filepath.Join(r.Path, name), 0755); err != nil {
+				return nil, fmt.Errorf("create dir %s: %w", name, err)
+			}
+			newIndex.Entries[name] = IndexEntry{Mode: DirMode, OSS: entry.OSS}
+			continue
+		}
+
 		objType, _, err := r.LoadObject(entry.Hash)
 		if err != nil {
 			return nil, fmt.Errorf("load object %s: %w", name, err)
