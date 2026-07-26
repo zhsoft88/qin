@@ -589,6 +589,7 @@ func (r *Repository) Push(remoteName string) error {
 func (r *Repository) collectOSChunks(commitHash core.Hash) (map[core.Hash]bool, error) {
 	needed := make(map[core.Hash]bool)
 	cOS := currentOS()
+	scanned := 0
 
 	var walkTree func(th core.Hash) error
 	walkTree = func(th core.Hash) error {
@@ -603,6 +604,10 @@ func (r *Repository) collectOSChunks(commitHash core.Hash) (map[core.Hash]bool, 
 			}
 			if IsSubmoduleMode(entry.Mode) || entry.Hash.IsZero() {
 				continue
+			}
+			scanned++
+			if scanned%10000 == 0 {
+				fmt.Fprintf(os.Stderr, "\r  scanning tree: %d entries...", scanned)
 			}
 			// Recurse into subtrees regardless of whether the tree object is local
 			objType, err := r.ObjectType(entry.Hash)
@@ -668,6 +673,7 @@ func (r *Repository) Pull(remoteName string) (*MergeResult, error) {
 	}
 
 	// Step 2: Collect chunk hashes needed for current OS
+	fmt.Fprintf(os.Stderr, "scanning tree...\n")
 	needed, err := r.collectOSChunks(hash)
 	if err != nil {
 		return nil, fmt.Errorf("collect needed chunks: %w", err)
