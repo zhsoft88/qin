@@ -629,11 +629,23 @@ func runRm(args []string) error {
 }
 // ---- commit ----
 func runCommit(args []string) error {
+	// Expand combined short flags: -am "msg" -> -a -m "msg"
+	expanded := make([]string, 0, len(args))
+	for _, a := range args {
+		if len(a) > 2 && a[0] == '-' && a[1] != '-' {
+			for i := 1; i < len(a); i++ {
+				expanded = append(expanded, "-"+string(a[i]))
+			}
+		} else {
+			expanded = append(expanded, a)
+		}
+	}
+
 	fs := flag.NewFlagSet("commit", flag.ExitOnError)
 	msg := fs.String("m", "", "commit message")
 	author := fs.String("author", "", "author (default: from config)")
 	allFlag := fs.Bool("a", false, "commit all modified files")
-	fs.Parse(args)
+	fs.Parse(expanded)
 	if *msg == "" {
 		return fmt.Errorf("commit message required (-m)")
 	}
