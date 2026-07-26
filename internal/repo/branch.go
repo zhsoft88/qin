@@ -165,7 +165,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 
 		if err := writeFileFromEntry(fullPath, fileData, winner.Mode); err != nil {
 			fmt.Fprintf(os.Stderr, "\r  warning: cannot write %s (%s), skipping\n", name, err)
-			continue
+
 		}
 
 		// Add all OS variants to index (default + OS-specific)
