@@ -164,8 +164,8 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 		}
 
 		if err := writeFileFromEntry(fullPath, fileData, winner.Mode); err != nil {
-			// File cannot be written on this platform — skip silently
-
+			// File cannot be written on this platform — skip entirely
+			continue
 		}
 
 		// Add all OS variants to index (default + OS-specific)
