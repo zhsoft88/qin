@@ -253,7 +253,7 @@ func TestAddPlaceholderRejected(t *testing.T) {
 	}
 
 	// Write placeholder file to working tree
-	if err := ioutil.WriteFile(filepath.Join(dir, "large.bin"), []byte("qin-lfs"), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(dir, "large.bin"), []byte("lo-lfs"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -276,9 +276,9 @@ func TestAddNonPlaceholderWithSameContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A file that happens to have content "qin-lfs" but no lazy index entry
+	// A file that happens to have content "lo-lfs" but no lazy index entry
 	// should be addable normally
-	if err := ioutil.WriteFile(filepath.Join(dir, "f.txt"), []byte("qin-lfs"), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(dir, "f.txt"), []byte("lo-lfs"), 0644); err != nil {
 		t.Fatal(err)
 	}
 

@@ -133,7 +133,7 @@ func TestStatusDeleted(t *testing.T) {
 	}
 }
 
-func TestStatusSkipsQinDir(t *testing.T) {
+func TestStatusSkipsLoDir(t *testing.T) {
 	dir, err := ioutil.TempDir("", "lo-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func TestStatusSkipsQinDir(t *testing.T) {
 	}
 
 	// Create a file inside .qin (should be ignored)
-	ioutil.WriteFile(filepath.Join(dir, QinDir, "test-file"), []byte("should be ignored"), 0644)
+	ioutil.WriteFile(filepath.Join(dir, LoDir, "test-file"), []byte("should be ignored"), 0644)
 
 	s, err := repo.WorkTreeStatus()
 	if err != nil {

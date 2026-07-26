@@ -768,7 +768,7 @@ func TestLazyCloneAndLfsPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "qin-lfs" {
+	if string(data) != "lo-lfs" {
 		t.Fatalf("expected placeholder for large file, got %q", data)
 	}
 

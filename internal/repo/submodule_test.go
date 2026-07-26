@@ -22,7 +22,7 @@ func TestIsSubmoduleMode(t *testing.T) {
 	}
 }
 
-func TestLoadModulesMissing(t *testing.T) {
+func TestLoadLoModulesMissing(t *testing.T) {
 	dir, err := ioutil.TempDir("", "lo-modules-*")
 	if err != nil {
 		t.Fatal(err)
@@ -34,19 +34,19 @@ func TestLoadModulesMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mods, err := LoadModules(r)
+	mods, err := LoadLoModules(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mods == nil {
-		t.Fatal("expected non-nil Modules")
+		t.Fatal("expected non-nil LoModules")
 	}
 	if len(mods.Submodules) != 0 {
 		t.Fatalf("expected empty submodules, got %d", len(mods.Submodules))
 	}
 }
 
-func TestSaveAndLoadModules(t *testing.T) {
+func TestSaveAndLoadLoModules(t *testing.T) {
 	dir, err := ioutil.TempDir("", "lo-modules-*")
 	if err != nil {
 		t.Fatal(err)
@@ -58,23 +58,23 @@ func TestSaveAndLoadModules(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mods := &Modules{
+	mods := &LoModules{
 		Submodules: map[string]SubmoduleDef{
 			"lib/foo": {URL: "https://github.com/user/repo"},
 		},
 	}
 
-	if err := SaveModules(r, mods); err != nil {
+	if err := SaveLoModules(r, mods); err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify file exists and is valid JSON
-	data, err := ioutil.ReadFile(filepath.Join(dir, ".qinmodules"))
+	data, err := ioutil.ReadFile(filepath.Join(dir, ".lomodules"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var parsed Modules
+	var parsed LoModules
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +90,8 @@ func TestSaveAndLoadModules(t *testing.T) {
 		t.Fatalf("expected URL https://github.com/user/repo, got %s", def.URL)
 	}
 
-	// Reload via LoadModules
-	loaded, err := LoadModules(r)
+	// Reload via LoadLoModules
+	loaded, err := LoadLoModules(r)
 	if err != nil {
 		t.Fatal(err)
 	}

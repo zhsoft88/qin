@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 )
 
-const modulesFile = ".qinmodules"
+const loModulesFile = ".lomodules"
 
 // SubmoduleDef describes a single submodule: the remote URL it points to.
 type SubmoduleDef struct {
 	URL string `json:"url"`
 }
 
-// Modules is the parsed content of .qinmodules.
-type Modules struct {
+// LoModules is the parsed content of .lomodules.
+type LoModules struct {
 	Submodules map[string]SubmoduleDef `json:"submodules"`
 }
 
@@ -38,21 +38,21 @@ func IsDirMode(mode uint32) bool {
 	return mode == DirMode
 }
 
-// LoadModules reads .qinmodules from disk. Returns an empty mapping
+// LoadLoModules reads .lomodules from disk. Returns an empty mapping
 // if the file doesn't exist.
-func LoadModules(r *Repository) (*Modules, error) {
-	path := filepath.Join(r.Path, modulesFile)
+func LoadLoModules(r *Repository) (*LoModules, error) {
+	path := filepath.Join(r.Path, loModulesFile)
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &Modules{Submodules: make(map[string]SubmoduleDef)}, nil
+			return &LoModules{Submodules: make(map[string]SubmoduleDef)}, nil
 		}
-		return nil, fmt.Errorf("read %s: %w", modulesFile, err)
+		return nil, fmt.Errorf("read %s: %w", loModulesFile, err)
 	}
 
-	var mods Modules
+	var mods LoModules
 	if err := json.Unmarshal(data, &mods); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", modulesFile, err)
+		return nil, fmt.Errorf("parse %s: %w", loModulesFile, err)
 	}
 	if mods.Submodules == nil {
 		mods.Submodules = make(map[string]SubmoduleDef)
@@ -60,20 +60,20 @@ func LoadModules(r *Repository) (*Modules, error) {
 	return &mods, nil
 }
 
-// SaveModules writes .qinmodules to disk.
-func SaveModules(r *Repository, mods *Modules) error {
+// SaveLoModules writes .lomodules to disk.
+func SaveLoModules(r *Repository, mods *LoModules) error {
 	data, err := json.MarshalIndent(mods, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal %s: %w", modulesFile, err)
+		return fmt.Errorf("marshal %s: %w", loModulesFile, err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(r.Path, modulesFile), data, 0644); err != nil {
-		return fmt.Errorf("write %s: %w", modulesFile, err)
+	if err := ioutil.WriteFile(filepath.Join(r.Path, loModulesFile), data, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", loModulesFile, err)
 	}
 	return nil
 }
 
 // AddSubmodule clones a submodule repo at the given path, records its URL
-// in .qinmodules, and stages both the .qinmodules file and the
+// in .lomodules, and stages both the .lomodules file and the
 // submodule entry in the index.
 func AddSubmodule(r *Repository, url, path string) error {
 	// Clone the submodule repo
@@ -89,18 +89,18 @@ func AddSubmodule(r *Repository, url, path string) error {
 		return fmt.Errorf("submodule has no commits")
 	}
 
-	// Update .qinmodules
-	mods, err := LoadModules(r)
+	// Update .lomodules
+	mods, err := LoadLoModules(r)
 	if err != nil {
 		return err
 	}
 	mods.Submodules[path] = SubmoduleDef{URL: url}
-	if err := SaveModules(r, mods); err != nil {
+	if err := SaveLoModules(r, mods); err != nil {
 		return err
 	}
 
-	// Stage .qinmodules
-	modulesPath := filepath.Join(r.Path, modulesFile)
+	// Stage .lomodules
+	modulesPath := filepath.Join(r.Path, loModulesFile)
 	if err := r.AddFile(modulesPath); err != nil {
 		return err
 	}

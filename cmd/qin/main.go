@@ -28,7 +28,7 @@ type command struct {
 }
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
-		fmt.Println("qin version " + core.Version)
+		fmt.Println("lo version " + core.Version)
 		return
 	}
 	if len(os.Args) < 2 {
@@ -82,12 +82,12 @@ func main() {
 	}
 }
 func usage() {
-	fmt.Println(`Usage: qin <command> [options]
+	fmt.Println(`Usage: lo <command> [options]
 Commands:
   init [<path>]     Initialize a new repository (default: current dir)
-  add <file|@file>  Stage file(s) [-A] [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
-  rm <file>         Remove staged file(s)
-  commit [-a]       Create a commit from staged files (-a to auto-stage modified)
+  add <file>        Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
+  rm [--cached] [-r] <file>   Remove files (--cached keeps on disk)
+  commit            Create a commit from staged files
   log [--graph]     Show commit history (--graph for branch visualization)
   status            Show working tree status
   cat <hash>        Print an object
@@ -146,15 +146,14 @@ func runInit(args []string) error {
 // ---- add ----
 func runAdd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
-	allFlag := fs.Bool("A", false, "add all files from the working tree")
 	osFlag := fs.Bool("os", false, "tag file(s) with current OS")
 	osMatchFlag := fs.String("os-match", "", "tag file(s) with OS expression (e.g., win, !win, win,linux)")
 	var excludeFlags stringSlice
 	fs.Var(&excludeFlags, "exclude", "exclude files matching glob pattern (repeatable)")
 	args = reorderFlags(args)
 	fs.Parse(args)
-	if fs.NArg() == 0 && !*allFlag {
-		return fmt.Errorf("usage: qin add [-A] [--os] [--os-match <expr>] [--exclude <glob>] <file|@file> [file...]")
+	if fs.NArg() == 0 {
+		return fmt.Errorf("usage: lo add [--os] [--os-match <expr>] [--exclude <glob>] <file> [file...]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -187,21 +186,8 @@ func runAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	// With -A, add all files in the working tree
-	fileArgs := fs.Args()
-	if *allFlag {
-		fileArgs = append(fileArgs, ".")
-	}
-
-	// Expand @file references in arguments: each @file is replaced by lines from that file
-	fileArgs, err = expandAtFiles(fileArgs, r.Path)
-	if err != nil {
-		return err
-	}
-
 	added := 0
-	for _, f := range fileArgs {
+	for _, f := range fs.Args() {
 		if useOSExpr != "" {
 			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags, &added, idx, ignorer); err != nil {
 				fmt.Fprintf(os.Stderr, "add %s: %v\n", f, err)
@@ -223,11 +209,11 @@ func runAdd(args []string) error {
 }
 // addFileOrDir adds a file or directory recursively (default OS).
 func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
-	fi, err := os.Lstat(path)
+	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+	if !fi.IsDir() {
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
@@ -305,9 +291,6 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		return nil
 	}
 	for _, entry := range entries {
-		if entry.Name() == repo.QinDir || entry.Name() == ".qinignore" {
-			continue
-		}
 		childPath := filepath.Join(path, entry.Name())
 		if entry.IsDir() {
 			absChild, _ := filepath.Abs(childPath)
@@ -324,11 +307,11 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 }
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
 func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
-	fi, err := os.Lstat(path)
+	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+	if !fi.IsDir() {
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
@@ -431,9 +414,6 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		return nil
 	}
 	for _, entry := range entries {
-		if entry.Name() == repo.QinDir || entry.Name() == ".qinignore" {
-			continue
-		}
 		childPath := filepath.Join(path, entry.Name())
 		if entry.IsDir() {
 			absChild, _ := filepath.Abs(childPath)
@@ -459,30 +439,6 @@ func relPath(r *repo.Repository, path string) string {
 		return path
 	}
 	return filepath.ToSlash(rel)
-}
-
-// expandAtFiles replaces each argument starting with '@' with the
-// non-blank, non-comment lines from that file.
-func expandAtFiles(args []string, repoPath string) ([]string, error) {
-	var out []string
-	for _, a := range args {
-		if !strings.HasPrefix(a, "@") {
-			out = append(out, a)
-			continue
-		}
-		f := filepath.Join(repoPath, a[1:])
-		data, err := ioutil.ReadFile(f)
-		if err != nil {
-			return nil, fmt.Errorf("read file list %s: %w", f, err)
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				out = append(out, line)
-			}
-		}
-	}
-	return out, nil
 }
 
 // expandExcludeFiles reads any exclude pattern starting with '@' as a file,
@@ -611,41 +567,71 @@ func clearLine() {
 }
 // ---- rm ----
 func runRm(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: qin rm <file> [file...]")
+	cached := false
+	recursive := false
+	var files []string
+	for _, a := range args {
+		if a == "--cached" {
+			cached = true
+		} else if a == "-r" {
+			recursive = true
+		} else {
+			files = append(files, a)
+		}
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("usage: lo rm [--cached] [-r] <file> [file...]")
 	}
 	r, err := findRepo()
 	if err != nil {
 		return err
 	}
-	for _, f := range args {
-		if err := r.RemoveFile(f); err != nil {
-			fmt.Fprintf(os.Stderr, "rm %s: %v\n", f, err)
-			continue
+	if recursive {
+		idx, err := r.LoadIndex()
+		if err != nil {
+			return err
 		}
-		fmt.Printf("removed: %s\n", f)
+		for _, f := range files {
+			abs, _ := filepath.Abs(f)
+			rel, _ := filepath.Rel(r.Path, abs)
+			relFormatted := filepath.ToSlash(rel)
+			for key := range idx.Entries {
+				path, _ := repo.ParseKey(key)
+				if path == relFormatted || strings.HasPrefix(path, relFormatted+"/") {
+					delete(idx.Entries, key)
+				}
+			}
+			if !cached {
+				os.RemoveAll(filepath.Join(r.Path, relFormatted))
+			}
+			fmt.Printf("  removed: %s\n", f)
+		}
+		return r.SaveIndex(idx)
+	}
+	for _, f := range files {
+		if cached {
+			if err := r.RemoveFile(f); err != nil {
+				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
+				continue
+			}
+			fmt.Printf("  removed from index: %s\n", f)
+		} else {
+			if err := r.RemoveFile(f); err != nil {
+				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
+				continue
+			}
+			os.Remove(filepath.Join(r.Path, f))
+			fmt.Printf("  removed: %s\n", f)
+		}
 	}
 	return nil
 }
 // ---- commit ----
 func runCommit(args []string) error {
-	// Expand combined short flags: -am "msg" -> -a -m "msg"
-	expanded := make([]string, 0, len(args))
-	for _, a := range args {
-		if len(a) > 2 && a[0] == '-' && a[1] != '-' {
-			for i := 1; i < len(a); i++ {
-				expanded = append(expanded, "-"+string(a[i]))
-			}
-		} else {
-			expanded = append(expanded, a)
-		}
-	}
-
 	fs := flag.NewFlagSet("commit", flag.ExitOnError)
 	msg := fs.String("m", "", "commit message")
 	author := fs.String("author", "", "author (default: from config)")
-	allFlag := fs.Bool("a", false, "commit all modified files")
-	fs.Parse(expanded)
+	fs.Parse(args)
 	if *msg == "" {
 		return fmt.Errorf("commit message required (-m)")
 	}
@@ -653,30 +639,6 @@ func runCommit(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	if *allFlag {
-		// Stage all modified/untracked files first (like add -A)
-		idx, err := r.LoadIndex()
-		if err != nil {
-			return err
-		}
-		ignorer, err := r.LoadIgnoreMatcher()
-		if err != nil {
-			return err
-		}
-		added := 0
-		if err := addFileOrDir(r, ".", nil, &added, idx, ignorer); err != nil {
-			return fmt.Errorf("stage files: %w", err)
-		}
-		if added > 0 {
-			if err := r.SaveIndex(idx); err != nil {
-				return err
-			}
-			clearLine()
-			fmt.Printf("staged %d file(s)\n", added)
-		}
-	}
-
 	auth := *author
 	if auth == "" {
 		cfg, _ := repo.LoadConfig(r.Path)
@@ -843,7 +805,7 @@ func runStatus(args []string) error {
 // ---- cat ----
 func runCat(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin cat <hash>")
+		return fmt.Errorf("usage: lo cat <hash>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -907,7 +869,7 @@ func runLs(args []string) error {
 // ---- checkout ----
 func runCheckout(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin checkout <ref>")
+		return fmt.Errorf("usage: lo checkout <ref>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -945,7 +907,7 @@ func runBranch(args []string) error {
 	}
 	if args[0] == "-d" {
 		if len(args) < 2 {
-			return fmt.Errorf("usage: qin branch -d <name>")
+			return fmt.Errorf("usage: lo branch -d <name>")
 		}
 		if err := r.DeleteBranch(args[1]); err != nil {
 			return err
@@ -962,7 +924,7 @@ func runBranch(args []string) error {
 // ---- switch ----
 func runSwitch(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin switch <branch>")
+		return fmt.Errorf("usage: lo switch <branch>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1030,20 +992,6 @@ func runDiff(args []string) error {
 			rest = append(rest, a)
 		}
 	}
-	// Separate refs from file paths: up to 2 leading args that look like refs
-	// are treated as refs; the rest are file path filters.
-	refs := []string{}
-	filterPaths := []string{}
-	for _, a := range rest {
-		if len(refs) < 2 && (len(a) >= 4 || a == "HEAD") {
-			if _, err := r.ResolveRef(a); err == nil {
-				refs = append(refs, a)
-				continue
-			}
-		}
-		filterPaths = append(filterPaths, a)
-	}
-
 	var diff *repo.Diff
 	if cached {
 		diff, err = r.DiffIndex()
@@ -1051,7 +999,7 @@ func runDiff(args []string) error {
 			return err
 		}
 	} else {
-		switch len(refs) {
+		switch len(rest) {
 		case 0:
 			diff, err = r.DiffWorking()
 			if err != nil {
@@ -1064,16 +1012,20 @@ func runDiff(args []string) error {
 				}
 			}
 		case 1:
+			_, err := r.ResolveRef(rest[0])
+			if err != nil {
+				return fmt.Errorf("resolve ref: %w", err)
+			}
 			diff, err = r.DiffIndex()
 			if err != nil {
 				return err
 			}
 		case 2:
-			h1, err := r.ResolveRef(refs[0])
+			h1, err := r.ResolveRef(rest[0])
 			if err != nil {
 				return fmt.Errorf("resolve ref: %w", err)
 			}
-			h2, err := r.ResolveRef(refs[1])
+			h2, err := r.ResolveRef(rest[1])
 			if err != nil {
 				return fmt.Errorf("resolve ref: %w", err)
 			}
@@ -1081,26 +1033,10 @@ func runDiff(args []string) error {
 			if err != nil {
 				return err
 			}
+		default:
+			return fmt.Errorf("usage: lo diff [--cached] [--patch] [<ref> <ref>]")
 		}
 	}
-	if diff == nil {
-		return nil
-	}
-
-	// Filter by file paths if specified
-	if len(filterPaths) > 0 {
-		var filtered []repo.DiffFile
-		for _, f := range diff.Files {
-			for _, p := range filterPaths {
-				if f.Name == p || strings.HasPrefix(f.Name, p+"/") {
-					filtered = append(filtered, f)
-					break
-				}
-			}
-		}
-		diff.Files = filtered
-	}
-
 	if patchMode {
 		patch, err := r.RenderPatch(diff)
 		if err != nil {
@@ -1115,7 +1051,7 @@ func runDiff(args []string) error {
 // ---- merge ----
 func runMerge(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin merge <branch>")
+		return fmt.Errorf("usage: lo merge <branch>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1146,7 +1082,7 @@ func runMerge(args []string) error {
 // ---- rebase ----
 func runRebase(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin rebase <branch>")
+		return fmt.Errorf("usage: lo rebase <branch>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1161,7 +1097,7 @@ func runRebase(args []string) error {
 // ---- cherry-pick ----
 func runCherryPick(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin cherry-pick <ref>")
+		return fmt.Errorf("usage: lo cherry-pick <ref>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1233,7 +1169,7 @@ func runRemote(args []string) error {
 	switch args[0] {
 	case "add":
 		if len(args) < 3 {
-			return fmt.Errorf("usage: qin remote add <name> <path>")
+			return fmt.Errorf("usage: lo remote add <name> <path>")
 		}
 		if err := r.SaveRemote(args[1], args[2]); err != nil {
 			return err
@@ -1241,7 +1177,7 @@ func runRemote(args []string) error {
 		fmt.Printf("added remote: %s -> %s\n", args[1], args[2])
 	case "remove":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: qin remote remove <name>")
+			return fmt.Errorf("usage: lo remote remove <name>")
 		}
 		if err := r.RemoveRemote(args[1]); err != nil {
 			return err
@@ -1335,7 +1271,7 @@ func runClone(args []string) error {
 		}
 	}
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: qin clone [--lazy] <url> <dir>")
+		return fmt.Errorf("usage: lo clone [--lazy] <url> <dir>")
 	}
 	r, err := repo.Clone(rest[0], rest[1], lazy)
 	if err != nil {
@@ -1355,7 +1291,7 @@ func runClone(args []string) error {
 // ---- lfs ----
 func runLfs(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin lfs status|pull [<file>]")
+		return fmt.Errorf("usage: lo lfs status|pull [<file>]")
 	}
 	switch args[0] {
 	case "status":
@@ -1400,7 +1336,7 @@ func runLfsStatus(args []string) error {
 // ---- lfs pull ----
 func runLfsPull(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin lfs pull [--all | <file>]")
+		return fmt.Errorf("usage: lo lfs pull [--all | <file>]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1445,7 +1381,7 @@ func runLfsPull(args []string) error {
 // ---- show ----
 func runShow(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin show [--os <os>] <file>")
+		return fmt.Errorf("usage: lo show [--os <os>] <file>")
 	}
 	osName := ""
 	filePath := ""
@@ -1458,7 +1394,7 @@ func runShow(args []string) error {
 		}
 	}
 	if filePath == "" {
-		return fmt.Errorf("usage: qin show [--os <os>] <file>")
+		return fmt.Errorf("usage: lo show [--os <os>] <file>")
 	}
 
 	// Default to current OS
@@ -1543,7 +1479,7 @@ func runConfig(args []string) error {
 
 	if len(args) > 0 && args[0] == "--unset" {
 		if len(args) != 2 {
-			return fmt.Errorf("usage: qin config --unset <key>")
+			return fmt.Errorf("usage: lo config --unset <key>")
 		}
 		if err := repo.ConfigUnset(cfg, args[1]); err != nil {
 			return err
@@ -1591,7 +1527,7 @@ func runConfig(args []string) error {
 		return nil
 
 	default:
-		return fmt.Errorf("usage: qin config [<key> [<value>]]")
+		return fmt.Errorf("usage: lo config [<key> [<value>]]")
 	}
 }
 
@@ -1608,7 +1544,7 @@ func runReset(args []string) error {
 			mode = "hard"
 		default:
 			if target != "" {
-				return fmt.Errorf("usage: qin reset [--soft | --mixed | --hard] [<commit>]")
+				return fmt.Errorf("usage: lo reset [--soft | --mixed | --hard] [<commit>]")
 			}
 			target = a
 		}
@@ -1653,7 +1589,7 @@ func runRestore(args []string) error {
 	}
 
 	if len(files) == 0 {
-		return fmt.Errorf("usage: qin restore [--staged] <file> [file...]")
+		return fmt.Errorf("usage: lo restore [--staged] <file> [file...]")
 	}
 
 	r, err := findRepo()
@@ -1706,12 +1642,12 @@ func runApply(args []string) error {
 }
 func runSubmodule(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: qin submodule add|update|status ...")
+		return fmt.Errorf("usage: lo submodule add|update|status ...")
 	}
 	switch args[0] {
 	case "add":
 		if len(args) < 3 {
-			return fmt.Errorf("usage: qin submodule add url path")
+			return fmt.Errorf("usage: lo submodule add url path")
 		}
 		r, err := findRepo()
 		if err != nil {
@@ -1732,7 +1668,7 @@ func runSubmodule(args []string) error {
 			initFlag = true
 			rest = rest[1:]
 		}
-		mods, err := repo.LoadModules(r)
+		mods, err := repo.LoadLoModules(r)
 		if err != nil {
 			return err
 		}
@@ -1763,7 +1699,7 @@ func runSubmodule(args []string) error {
 		if err != nil {
 			return err
 		}
-		mods, err := repo.LoadModules(r)
+		mods, err := repo.LoadLoModules(r)
 		if err != nil {
 			return err
 		}
@@ -1804,7 +1740,7 @@ func humanSize(bytes int64) string {
 	return fmt.Sprintf("%d MB", bytes/(1024*1024))
 }
 func cloneSubmodules(r *repo.Repository) error {
-	mods, err := repo.LoadModules(r)
+	mods, err := repo.LoadLoModules(r)
 	if err != nil {
 		return err
 	}
@@ -1850,7 +1786,7 @@ func runLostFound(args []string) error {
 }
 
 func runVersion(args []string) error {
-	fmt.Println("qin version " + core.Version)
+	fmt.Println("lo version " + core.Version)
 	return nil
 }
 

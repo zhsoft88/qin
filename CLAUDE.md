@@ -41,7 +41,7 @@ Files added via `add` go through `StoreChunkedFile()`:
 1. `core.NewChunker` splits data at content-defined boundaries (Gear hash)
 2. Single-chunk files store as plain `ObjectBlob`; multi-chunk files store each chunk as a blob and produce an `ObjectChunkManifest`
 3. `LoadFileContent()` reads back: if the hash is a manifest → reassemble chunks; if a plain blob → return directly
-4. LFS lazy mode: clone with `--lazy` skips chunk blobs; files on disk get `"qin-lfs"` placeholder; `lfs pull` fetches real chunks
+4. LFS lazy mode: clone with `--lazy` skips chunk blobs; files on disk get `"lo-lfs"` placeholder; `lfs pull` fetches real chunks
 
 ### Remote Transport
 
@@ -78,4 +78,4 @@ Files added via `add` go through `StoreChunkedFile()`:
 
 ### Legacy Naming
 
-The project was originally named "lo" — the binary was `lo`, the LFS placeholder was `lo-lfs`. These names still appear in some comments and internal references. The config type is `Config`, not `LoConfig`.
+The project was originally named "lo" — the binary displays `lo` in usage text and error messages. Legacy names (`lo`, `lo-lfs`, `.lo`) appear in comments, error strings, and internal references. The config type is `Config`, not `LoConfig`.

@@ -45,7 +45,7 @@ type Index struct {
 const indexFileName = "index"
 
 func (r *Repository) indexPath() string {
-	return filepath.Join(r.QinDir(), indexFileName)
+	return filepath.Join(r.LoDir(), indexFileName)
 }
 
 // LoadIndex reads the index from disk, returning an empty index if none exists.
@@ -203,7 +203,7 @@ func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, id
 		}
 
 		// Reject LFS placeholder files — user must lfs-pull first
-		if string(data) == "qin-lfs" && r.hasAnyLazyEntry(filepath.ToSlash(relPath)) {
+		if string(data) == "lo-lfs" && r.hasAnyLazyEntry(filepath.ToSlash(relPath)) {
 			return fmt.Errorf("cannot add placeholder file '%s': use 'lfs-pull' to fetch real content first", filePath)
 		}
 	}
@@ -344,21 +344,7 @@ func (r *Repository) RemoveFile(filePath string) error {
 		}
 	}
 	if keyToDelete == "" {
-		// No exact match — try removing all files under this directory prefix
-		var prefixKeys []string
-		for key := range idx.Entries {
-			if path, _ := parseKey(key); path == relFormatted || strings.HasPrefix(path, relFormatted+"/") {
-				prefixKeys = append(prefixKeys, key)
-			}
-		}
-		if len(prefixKeys) == 0 {
-			return fmt.Errorf("file not tracked: %s", filePath)
-		}
-		for _, key := range prefixKeys {
-			delete(idx.Entries, key)
-		}
-		fmt.Printf("removed %d file(s) from index\n", len(prefixKeys))
-		return r.SaveIndex(idx)
+		return fmt.Errorf("file not tracked: %s", filePath)
 	}
 
 	delete(idx.Entries, keyToDelete)
