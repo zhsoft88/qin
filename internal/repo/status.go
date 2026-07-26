@@ -164,9 +164,18 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		}
 
 		if _, ok := allEntries[name]; ok {
-			data, err := ioutil.ReadFile(path)
-			if err != nil {
-				return nil
+			var data []byte
+			if fi.Mode()&os.ModeSymlink != 0 {
+				target, err := os.Readlink(path)
+				if err != nil {
+					return nil
+				}
+				data = []byte(target)
+			} else {
+				data, err = ioutil.ReadFile(path)
+				if err != nil {
+					return nil
+				}
 			}
 			entry := allEntries[name]
 			contentHash := core.HashFromBytes(data)

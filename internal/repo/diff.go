@@ -121,10 +121,10 @@ func (r *Repository) DiffWorking() (*Diff, error) {
 
 	working := make(map[string]TreeEntry)
 	for cleanPath, entry := range visible {
-		fullPath := filepath.Join(r.Path, cleanPath)
-		if IsSubmoduleMode(entry.Mode) {
+		if IsSubmoduleMode(entry.Mode) || IsDirMode(entry.Mode) {
 			continue
 		}
+		fullPath := filepath.Join(r.Path, cleanPath)
 		data, err := ioutil.ReadFile(fullPath)
 		if err != nil {
 			if os.IsNotExist(err) {
