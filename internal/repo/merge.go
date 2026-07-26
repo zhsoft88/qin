@@ -317,7 +317,6 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 		if objType == core.ObjectChunkManifest {
 			fileData, err = r.LoadChunkedFile(entry.Hash)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "\r  warning: chunked file %s missing chunks, skipping\n", name)
 				continue
 			}
 		} else {
