@@ -329,25 +329,17 @@ func (r *Repository) RemoveFile(filePath string) error {
 
 	relFormatted := filepath.ToSlash(relPath)
 
-	// Find which variant is visible on the current OS and remove only that one
-	cOS := currentOS()
-	var keyToDelete string
-	for key, entry := range idx.Entries {
-		if path, os := parseKey(key); path == relFormatted && osMatch(entry.OSS, cOS) {
-			if keyToDelete == "" || os != 0 {
-				// Prefer OS-specific match over default (same logic as visibleEntries)
-				keyToDelete = key
-				if os != 0 {
-					break // OS-specific match is the definitive visible entry
-				}
-			}
+	// Remove all entries for this path (default and OS-specific variants)
+	found := false
+	for key := range idx.Entries {
+		if path, _ := parseKey(key); path == relFormatted {
+			delete(idx.Entries, key)
+			found = true
 		}
 	}
-	if keyToDelete == "" {
+	if !found {
 		return fmt.Errorf("file not tracked: %s", filePath)
 	}
-
-	delete(idx.Entries, keyToDelete)
 	return r.SaveIndex(idx)
 }
 
