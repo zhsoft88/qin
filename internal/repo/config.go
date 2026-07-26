@@ -36,7 +36,7 @@ func DefaultConfig() *Config {
 }
 
 func LoadConfig(repoPath string) (*Config, error) {
-	cfgPath := filepath.Join(repoPath, LoDir, "config")
+	cfgPath := filepath.Join(repoPath, QinDir, "config")
 	data, err := ioutil.ReadFile(cfgPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -53,7 +53,7 @@ func LoadConfig(repoPath string) (*Config, error) {
 }
 
 func SaveConfig(repoPath string, cfg *Config) error {
-	cfgPath := filepath.Join(repoPath, LoDir, "config")
+	cfgPath := filepath.Join(repoPath, QinDir, "config")
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)

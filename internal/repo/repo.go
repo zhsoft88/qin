@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 )
 
-var LoDir = ".qin"
+var QinDir = ".qin"
 
 type Repository struct {
 	Path   string
@@ -24,15 +24,15 @@ func Init(path string) (*Repository, error) {
 		return nil, fmt.Errorf("resolve path: %w", err)
 	}
 
-	loDir := filepath.Join(absPath, LoDir)
-	if _, err := os.Stat(loDir); err == nil {
+	qinDir := filepath.Join(absPath, QinDir)
+	if _, err := os.Stat(qinDir); err == nil {
 		return nil, fmt.Errorf("already a repository: %s", absPath)
 	}
 
 	dirs := []string{
-		filepath.Join(loDir, "objects"),
-		filepath.Join(loDir, "refs", "heads"),
-		filepath.Join(loDir, "refs", "tags"),
+		filepath.Join(qinDir, "objects"),
+		filepath.Join(qinDir, "refs", "heads"),
+		filepath.Join(qinDir, "refs", "tags"),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
@@ -40,7 +40,7 @@ func Init(path string) (*Repository, error) {
 		}
 	}
 
-	if err := ioutil.WriteFile(filepath.Join(loDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(qinDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0644); err != nil {
 		return nil, fmt.Errorf("write HEAD: %w", err)
 	}
 
@@ -64,8 +64,8 @@ func Open(path string) (*Repository, error) {
 
 	dir := absPath
 	for {
-		loDir := filepath.Join(dir, LoDir)
-		if info, err := os.Stat(loDir); err == nil && info.IsDir() {
+		qinDir := filepath.Join(dir, QinDir)
+		if info, err := os.Stat(qinDir); err == nil && info.IsDir() {
 			cfg, err := LoadConfig(dir)
 			if err != nil {
 				return nil, err
@@ -80,20 +80,20 @@ func Open(path string) (*Repository, error) {
 	}
 }
 
-func (r *Repository) LoDir() string {
-	return filepath.Join(r.Path, LoDir)
+func (r *Repository) QinDir() string {
+	return filepath.Join(r.Path, QinDir)
 }
 
 func (r *Repository) ObjectsDir() string {
-	return filepath.Join(r.Path, LoDir, "objects")
+	return filepath.Join(r.Path, QinDir, "objects")
 }
 
 func (r *Repository) RefsDir() string {
-	return filepath.Join(r.Path, LoDir, "refs")
+	return filepath.Join(r.Path, QinDir, "refs")
 }
 
 func (r *Repository) HeadPath() string {
-	return filepath.Join(r.Path, LoDir, "HEAD")
+	return filepath.Join(r.Path, QinDir, "HEAD")
 }
 
 // ReadHEAD returns the current HEAD value.
@@ -117,7 +117,7 @@ func (r *Repository) SetHEAD(ref string) error {
 
 // ReadRef reads the commit hash a ref points to.
 func (r *Repository) ReadRef(ref string) (string, error) {
-	refPath := filepath.Join(r.Path, LoDir, ref)
+	refPath := filepath.Join(r.Path, QinDir, ref)
 	data, err := ioutil.ReadFile(refPath)
 	if err != nil {
 		return "", err
@@ -131,7 +131,7 @@ func (r *Repository) ReadRef(ref string) (string, error) {
 
 // WriteRef writes a commit hash to a ref.
 func (r *Repository) WriteRef(ref, hash string) error {
-	refPath := filepath.Join(r.Path, LoDir, ref)
+	refPath := filepath.Join(r.Path, QinDir, ref)
 	if err := os.MkdirAll(filepath.Dir(refPath), 0755); err != nil {
 		return err
 	}

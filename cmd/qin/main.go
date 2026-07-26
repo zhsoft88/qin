@@ -305,7 +305,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		return nil
 	}
 	for _, entry := range entries {
-		if entry.Name() == repo.LoDir || entry.Name() == ".qinignore" {
+		if entry.Name() == repo.QinDir || entry.Name() == ".qinignore" {
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
@@ -431,7 +431,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		return nil
 	}
 	for _, entry := range entries {
-		if entry.Name() == repo.LoDir || entry.Name() == ".qinignore" {
+		if entry.Name() == repo.QinDir || entry.Name() == ".qinignore" {
 			continue
 		}
 		childPath := filepath.Join(path, entry.Name())
@@ -1720,7 +1720,7 @@ func runSubmodule(args []string) error {
 			initFlag = true
 			rest = rest[1:]
 		}
-		mods, err := repo.LoadLoModules(r)
+		mods, err := repo.LoadModules(r)
 		if err != nil {
 			return err
 		}
@@ -1751,7 +1751,7 @@ func runSubmodule(args []string) error {
 		if err != nil {
 			return err
 		}
-		mods, err := repo.LoadLoModules(r)
+		mods, err := repo.LoadModules(r)
 		if err != nil {
 			return err
 		}
@@ -1792,7 +1792,7 @@ func humanSize(bytes int64) string {
 	return fmt.Sprintf("%d MB", bytes/(1024*1024))
 }
 func cloneSubmodules(r *repo.Repository) error {
-	mods, err := repo.LoadLoModules(r)
+	mods, err := repo.LoadModules(r)
 	if err != nil {
 		return err
 	}
@@ -1838,7 +1838,7 @@ func runLostFound(args []string) error {
 }
 
 func runVersion(args []string) error {
-	fmt.Println("lo version " + core.Version)
+	fmt.Println("qin version " + core.Version)
 	return nil
 }
 

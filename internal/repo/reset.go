@@ -147,7 +147,7 @@ func (r *Repository) writeTreeEntryToDisk(name string, entry TreeEntry) error {
 				return fmt.Errorf("load chunked file %s: %w", name, err)
 			}
 		} else {
-			fileData = []byte("lo-lfs")
+			fileData = []byte("qin-lfs")
 		}
 	} else {
 		_, blobData, err := r.LoadObject(entry.Hash)

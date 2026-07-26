@@ -132,7 +132,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 			return nil
 		}
 
-		if rel == LoDir || (len(rel) > len(LoDir) && rel[:len(LoDir)+1] == LoDir+string(filepath.Separator)) {
+		if rel == QinDir || (len(rel) > len(QinDir) && rel[:len(QinDir)+1] == QinDir+string(filepath.Separator)) {
 			if fi.IsDir() {
 				return filepath.SkipDir
 			}

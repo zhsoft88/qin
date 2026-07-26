@@ -45,7 +45,7 @@ type Index struct {
 const indexFileName = "index"
 
 func (r *Repository) indexPath() string {
-	return filepath.Join(r.LoDir(), indexFileName)
+	return filepath.Join(r.QinDir(), indexFileName)
 }
 
 // LoadIndex reads the index from disk, returning an empty index if none exists.
@@ -203,7 +203,7 @@ func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, id
 		}
 
 		// Reject LFS placeholder files — user must lfs-pull first
-		if string(data) == "lo-lfs" && r.hasAnyLazyEntry(filepath.ToSlash(relPath)) {
+		if string(data) == "qin-lfs" && r.hasAnyLazyEntry(filepath.ToSlash(relPath)) {
 			return fmt.Errorf("cannot add placeholder file '%s': use 'lfs-pull' to fetch real content first", filePath)
 		}
 	}

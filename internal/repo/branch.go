@@ -152,7 +152,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 					return fmt.Errorf("load chunked file %s: %w", name, err)
 				}
 			} else {
-				fileData = []byte("lo-lfs")
+				fileData = []byte("qin-lfs")
 				isLazy = true
 			}
 		} else {
