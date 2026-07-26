@@ -609,6 +609,32 @@ func runRm(args []string) error {
 		return r.SaveIndex(idx)
 	}
 	for _, f := range files {
+		// Auto-detect directories — remove recursively
+		if fi, err := os.Stat(f); err == nil && fi.IsDir() {
+			abs, _ := filepath.Abs(f)
+			rel, _ := filepath.Rel(r.Path, abs)
+			relFormatted := filepath.ToSlash(rel)
+			idx, err := r.LoadIndex()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
+				continue
+			}
+			for key := range idx.Entries {
+				path, _ := repo.ParseKey(key)
+				if path == relFormatted || strings.HasPrefix(path, relFormatted+"/") {
+					delete(idx.Entries, key)
+				}
+			}
+			if !cached {
+				os.RemoveAll(filepath.Join(r.Path, relFormatted))
+			}
+			if err := r.SaveIndex(idx); err != nil {
+				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
+				continue
+			}
+			fmt.Printf("  removed: %s\n", f)
+			continue
+		}
 		if cached {
 			if err := r.RemoveFile(f); err != nil {
 				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
