@@ -93,6 +93,7 @@ func (r *Repository) mergeCommit(target core.Hash, label string) (*MergeResult, 
 	}
 
 	// Find merge base
+	fmt.Fprintf(os.Stderr, "finding merge base...\n")
 	base, err := r.FindMergeBase(head, target)
 	if err != nil {
 		return nil, fmt.Errorf("find merge base: %w", err)
