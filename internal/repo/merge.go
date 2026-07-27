@@ -109,10 +109,12 @@ func (r *Repository) mergeCommit(target core.Hash, label string) (*MergeResult, 
 
 	if base == head {
 		// Fast-forward: move HEAD to target
+		fmt.Fprintf(os.Stderr, "fast-forward merging...\n")
 		return r.fastForwardMerge(head, target)
 	}
 
 	// Three-way merge
+	fmt.Fprintf(os.Stderr, "three-way merging...\n")
 	return r.threeWayMerge(label, head, target, base)
 }
 
