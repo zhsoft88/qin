@@ -344,6 +344,7 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 			ContentHash: core.HashFromBytes(fileData),
 			Size:        entry.Size,
 			Mode:        entry.Mode,
+			OSS:         entry.OSS,
 		}
 	}
 
