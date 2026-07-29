@@ -871,63 +871,38 @@ func runLs(args []string) error {
 	}
 
 	visible := repo.VisibleFiles(files, repo.CurrentOSID())
-	type displayEntry struct {
-		path   string
-		hash   string
-		size   int64
-		osTag  string
-		chunks int // 0 = not chunked, -1 = unknown
-	}
-	var entries []displayEntry
-	for path, entry := range visible {
-		// OS tag from the raw entry (before OS filtering)
-		osTag := "*"
-		if raw, ok := files[path]; ok && len(raw.OSS) > 0 {
-			names := make([]string, len(raw.OSS))
-			for i, id := range raw.OSS {
-				names[i] = repo.OSName(id)
-			}
-			osTag = strings.Join(names, ",")
+// Pre-build OS tag map to avoid O(N^2) lookup
+pathOS := make(map[string]string, len(files))
+for k, raw := range files {
+	p, _ := repo.ParseKey(k)
+	if len(raw.OSS) > 0 {
+		names := make([]string, len(raw.OSS))
+		for i, id := range raw.OSS {
+			names[i] = repo.OSName(id)
 		}
-		// Also check OS-specific keys
-		for k, raw := range files {
-			if p, _ := repo.ParseKey(k); p == path && len(raw.OSS) > 0 {
-				names := make([]string, len(raw.OSS))
-				for i, id := range raw.OSS {
-					names[i] = repo.OSName(id)
-				}
-				osTag = strings.Join(names, ",")
-				break
+		pathOS[p] = strings.Join(names, ",")
+	} else if _, exists := pathOS[p]; !exists {
+		pathOS[p] = "*"
+	}
+}
+threshold := int64(r.Config.Core.ChunkThreshold)
+for path, entry := range visible {
+	osTag := pathOS[path]
+	// Chunk count
+	chunks := 0
+	if entry.Size >= threshold {
+		if objType, err := r.ObjectType(entry.Hash); err == nil && objType == core.ObjectChunkManifest {
+			if manifest, err := r.LoadChunkManifest(entry.Hash); err == nil {
+				chunks = len(manifest.Chunks)
 			}
 		}
-		// Chunk count (skip files too small to be chunked)
-		chunks := 0
-		threshold := int64(r.Config.Core.ChunkThreshold)
-		if entry.Size >= threshold {
-			if objType, err := r.ObjectType(entry.Hash); err == nil && objType == core.ObjectChunkManifest {
-				if manifest, err := r.LoadChunkManifest(entry.Hash); err == nil {
-					chunks = len(manifest.Chunks)
-				}
-			}
-		}
-		entries = append(entries, displayEntry{
-			path:   path,
-			hash:   entry.Hash.Short(),
-			size:   entry.Size,
-			osTag:  osTag,
-			chunks: chunks,
-		})
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].path < entries[j].path
-	})
-	for _, e := range entries {
-		chunkInfo := ""
-		if e.chunks > 0 {
-			chunkInfo = fmt.Sprintf("  [%d chunks]", e.chunks)
-		}
-		fmt.Printf("%s  %s  [%s]  %s%s\n", e.hash, humanSize(e.size), e.osTag, e.path, chunkInfo)
+	chunkInfo := ""
+	if chunks > 0 {
+		chunkInfo = fmt.Sprintf("  [%d chunks]", chunks)
 	}
+	fmt.Printf("%s  %s  [%s]  %s%s\n", entry.Hash.Short(), humanSize(entry.Size), osTag, path, chunkInfo)
+}
 	return nil
 }
 // ---- checkout ----
