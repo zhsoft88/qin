@@ -5,7 +5,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/zhsoft88/qin/internal/core"
 )
@@ -154,9 +153,6 @@ func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, id
 	relPath, err := filepath.Rel(r.Path, absPath)
 	if err != nil {
 		return fmt.Errorf("path outside repository: %w", err)
-	}
-	if relPath == "" || strings.HasPrefix(relPath, ".."+string(filepath.Separator)) || relPath == ".." {
-		return fmt.Errorf("path outside repository")
 	}
 
 	fi, err := os.Lstat(absPath)

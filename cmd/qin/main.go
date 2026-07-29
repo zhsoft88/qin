@@ -473,10 +473,22 @@ func expandExcludeFiles(excludes []string, repoPath string) ([]string, error) {
 func expandArgFiles(args []string, repoPath string) []string {
 	var out []string
 	for _, p := range args {
-		if strings.HasPrefix(p, "@") {
-			out = append(out, p[1:])
-		} else {
+		if !strings.HasPrefix(p, "@") {
 			out = append(out, p)
+			continue
+		}
+		f := filepath.Join(repoPath, p[1:])
+		data, err := ioutil.ReadFile(f)
+		if err != nil {
+			// @file not found - fall back to literal path
+			out = append(out, p[1:])
+			continue
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				out = append(out, line)
+			}
 		}
 	}
 	return out
