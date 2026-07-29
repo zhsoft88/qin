@@ -900,11 +900,14 @@ func runLs(args []string) error {
 				break
 			}
 		}
-		// Chunk count
+		// Chunk count (skip files too small to be chunked)
 		chunks := 0
-		if objType, err := r.ObjectType(entry.Hash); err == nil && objType == core.ObjectChunkManifest {
-			if manifest, err := r.LoadChunkManifest(entry.Hash); err == nil {
-				chunks = len(manifest.Chunks)
+		threshold := int64(r.Config.Core.ChunkThreshold)
+		if entry.Size >= threshold {
+			if objType, err := r.ObjectType(entry.Hash); err == nil && objType == core.ObjectChunkManifest {
+				if manifest, err := r.LoadChunkManifest(entry.Hash); err == nil {
+					chunks = len(manifest.Chunks)
+				}
 			}
 		}
 		entries = append(entries, displayEntry{
@@ -921,7 +924,7 @@ func runLs(args []string) error {
 	for _, e := range entries {
 		chunkInfo := ""
 		if e.chunks > 0 {
-			chunkInfo = fmt.Sprintf("  [\n%d chunks]\n", e.chunks)
+			chunkInfo = fmt.Sprintf("  [%d chunks]", e.chunks)
 		}
 		fmt.Printf("%s  %s  [%s]  %s%s\n", e.hash, humanSize(e.size), e.osTag, e.path, chunkInfo)
 	}
