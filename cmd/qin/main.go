@@ -872,23 +872,58 @@ func runLs(args []string) error {
 
 	visible := repo.VisibleFiles(files, repo.CurrentOSID())
 	type displayEntry struct {
-		path string
-		hash string
-		size int64
+		path   string
+		hash   string
+		size   int64
+		osTag  string
+		chunks int // 0 = not chunked, -1 = unknown
 	}
 	var entries []displayEntry
 	for path, entry := range visible {
+		// OS tag from the raw entry (before OS filtering)
+		osTag := "*"
+		if raw, ok := files[path]; ok && len(raw.OSS) > 0 {
+			names := make([]string, len(raw.OSS))
+			for i, id := range raw.OSS {
+				names[i] = repo.OSName(id)
+			}
+			osTag = strings.Join(names, ",")
+		}
+		// Also check OS-specific keys
+		for k, raw := range files {
+			if p, _ := repo.ParseKey(k); p == path && len(raw.OSS) > 0 {
+				names := make([]string, len(raw.OSS))
+				for i, id := range raw.OSS {
+					names[i] = repo.OSName(id)
+				}
+				osTag = strings.Join(names, ",")
+				break
+			}
+		}
+		// Chunk count
+		chunks := 0
+		if objType, err := r.ObjectType(entry.Hash); err == nil && objType == core.ObjectChunkManifest {
+			if manifest, err := r.LoadChunkManifest(entry.Hash); err == nil {
+				chunks = len(manifest.Chunks)
+			}
+		}
 		entries = append(entries, displayEntry{
-			path: path,
-			hash: entry.Hash.Short(),
-			size: entry.Size,
+			path:   path,
+			hash:   entry.Hash.Short(),
+			size:   entry.Size,
+			osTag:  osTag,
+			chunks: chunks,
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].path < entries[j].path
 	})
 	for _, e := range entries {
-		fmt.Printf("%s  %s  %s\n", e.hash, humanSize(e.size), e.path)
+		chunkInfo := ""
+		if e.chunks > 0 {
+			chunkInfo = fmt.Sprintf("  [\n%d chunks]\n", e.chunks)
+		}
+		fmt.Printf("%s  %s  [%s]  %s%s\n", e.hash, humanSize(e.size), e.osTag, e.path, chunkInfo)
 	}
 	return nil
 }
