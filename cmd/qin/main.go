@@ -870,26 +870,22 @@ func runLs(args []string) error {
 		return nil
 	}
 
-	visible := repo.VisibleFiles(files, repo.CurrentOSID())
-// Pre-build OS tag map to avoid O(N^2) lookup
-pathOS := make(map[string]string, len(files))
-for k, raw := range files {
-	p, _ := repo.ParseKey(k)
-	if len(raw.OSS) > 0 {
-		names := make([]string, len(raw.OSS))
-		for i, id := range raw.OSS {
+	// Show all files regardless of OS
+for key, entry := range files {
+	path, osID := repo.ParseKey(key)
+	osTag := "*"
+	if osID != 0 {
+		osTag = repo.OSName(osID)
+	} else if len(entry.OSS) > 0 {
+		names := make([]string, len(entry.OSS))
+		for i, id := range entry.OSS {
 			names[i] = repo.OSName(id)
 		}
-		pathOS[p] = strings.Join(names, ",")
-	} else if _, exists := pathOS[p]; !exists {
-		pathOS[p] = "*"
+		osTag = strings.Join(names, ",")
 	}
-}
-threshold := int64(r.Config.Core.ChunkThreshold)
-for path, entry := range visible {
-	osTag := pathOS[path]
 	// Chunk count
 	chunks := 0
+	threshold := int64(r.Config.Core.ChunkThreshold)
 	if entry.Size >= threshold {
 		if objType, err := r.ObjectType(entry.Hash); err == nil && objType == core.ObjectChunkManifest {
 			if manifest, err := r.LoadChunkManifest(entry.Hash); err == nil {
@@ -903,7 +899,7 @@ for path, entry := range visible {
 	}
 	fmt.Printf("%s  %s  [%s]  %s%s\n", entry.Hash.Short(), humanSize(entry.Size), osTag, path, chunkInfo)
 }
-	return nil
+return nil
 }
 // ---- checkout ----
 func runCheckout(args []string) error {
