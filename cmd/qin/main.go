@@ -186,8 +186,12 @@ func runAdd(args []string) error {
 	if err != nil {
 		return err
 	}
+	args, err = expandExcludeFiles(fs.Args(), r.Path)
+	if err != nil {
+		return err
+	}
 	added := 0
-	for _, f := range fs.Args() {
+	for _, f := range args {
 		if useOSExpr != "" {
 			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags, &added, idx, ignorer); err != nil {
 				fmt.Fprintf(os.Stderr, "add %s: %v\n", f, err)
