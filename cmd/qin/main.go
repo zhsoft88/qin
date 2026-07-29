@@ -480,7 +480,7 @@ func expandArgFiles(args []string, repoPath string) []string {
 		f := filepath.Join(repoPath, p[1:])
 		data, err := ioutil.ReadFile(f)
 		if err != nil {
-			// @file not found — treat as literal path
+				// @file not found M-bM-^@M-^T use path without @
 			out = append(out, p)
 			continue
 		}
