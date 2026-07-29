@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-- **Build**: `mkdir -p dist && go build -o dist/qin ./cmd/qin`
+- **Build (Linux/Mac)**: `mkdir -p dist && go build -o dist/qin ./cmd/qin`
+- **Build (Windows)**: `mkdir dist 2>nul & go build -o dist/qin.exe ./cmd/qin`
 - **Install**: `go install github.com/zhsoft88/qin/cmd/qin@latest`
 - **Test all**: `go test ./...`
 - **Test single package**: `go test ./internal/repo/...`
