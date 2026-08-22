@@ -70,6 +70,7 @@ Files added via `add` go through `StoreChunkedFile()`:
   HEAD                — "ref: refs/heads/main" or a commit hash
   config              — JSON config (chunk sizes, diff limits, user)
   index               — JSON staging area
+  untracked-cache.json— per-directory untracked lists for fast status (git core.untrackedCache style)
   objects/            — Git-style XX/YYYYYY hash layout
   refs/
     heads/            — branch refs (one file per branch)

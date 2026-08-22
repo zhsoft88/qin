@@ -328,6 +328,195 @@ func TestStatusIgnoredDirWithNegate(t *testing.T) {
 	}
 }
 
+// TestStatusUntrackedCache verifies the per-directory untracked cache:
+// results are correct on cache hits, new untracked files are found after a
+// directory mtime change, and ignore-rule changes invalidate the cache.
+func TestStatusUntrackedCache(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Tracked content in a subdir forces the walk to descend into it
+	ioutil.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked"), 0644)
+	repo.AddFile(filepath.Join(dir, "tracked.txt"))
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ioutil.WriteFile(filepath.Join(dir, "src", "tracked.txt"), []byte("t2"), 0644)
+	repo.AddFile(filepath.Join(dir, "src", "tracked.txt"))
+	ioutil.WriteFile(filepath.Join(dir, "u.txt"), []byte("u"), 0644)
+	ioutil.WriteFile(filepath.Join(dir, "src", "u.txt"), []byte("u"), 0644)
+	if err := os.MkdirAll(filepath.Join(dir, "d"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ioutil.WriteFile(filepath.Join(dir, "d", "x.txt"), []byte("x"), 0644)
+
+	// First run: full scan, cache written
+	s, err := repo.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"d/", "src/u.txt", "u.txt"}
+	if len(s.Untracked) != len(want) || s.Untracked[0] != want[0] || s.Untracked[1] != want[1] || s.Untracked[2] != want[2] {
+		t.Fatalf("expected %v, got %v", want, s.Untracked)
+	}
+	if _, err := os.Stat(repo.untrackedCachePath()); err != nil {
+		t.Fatal("expected untracked cache file to be written")
+	}
+
+	// Second run: cache hit, same results
+	s, err = repo.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Untracked) != 3 {
+		t.Fatalf("expected 3 untracked on cache hit, got %v", s.Untracked)
+	}
+
+	// New untracked file in the root bumps the root dir mtime → found
+	time.Sleep(20 * time.Millisecond)
+	ioutil.WriteFile(filepath.Join(dir, "u2.txt"), []byte("u2"), 0644)
+	s, err = repo.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range s.Untracked {
+		if p == "u2.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected u2.txt after dir mtime change, got %v", s.Untracked)
+	}
+
+	// New untracked file in a SUBDIR changes only that dir's mtime — the
+	// root cache entry stays valid but the walk must still descend into
+	// the cached child dir and validate it at its own level.
+	time.Sleep(20 * time.Millisecond)
+	ioutil.WriteFile(filepath.Join(dir, "src", "u2.txt"), []byte("u2"), 0644)
+	s, err = repo.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, p := range s.Untracked {
+		if p == "src/u2.txt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected src/u2.txt (subdir changed), got %v", s.Untracked)
+	}
+	// The root entry must record the descended child dirs
+	cache := repo.loadUntrackedCache()
+	rootEnt, ok := cache.Dirs[""]
+	if !ok {
+		t.Fatal("expected root cache entry")
+	}
+	if len(rootEnt.Dirs) == 0 {
+		t.Fatal("expected root entry to record descended child dirs")
+	}
+
+	// Ignore-rule change invalidates the cache: u.txt now ignored
+	ioutil.WriteFile(filepath.Join(dir, ".qinignore"), []byte("u.txt\n"), 0644)
+	s, err = repo.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range s.Untracked {
+		if p == "u.txt" {
+			t.Fatalf("u.txt should be ignored after .qinignore change, got %v", s.Untracked)
+		}
+	}
+}
+
+// TestStatusUntrackedCacheIndexInvalidation verifies that adding a cached
+// untracked file to the index invalidates the cache (index mtime changed),
+// so the file is no longer reported as untracked.
+func TestStatusUntrackedCacheIndexInvalidation(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ioutil.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked"), 0644)
+	repo.AddFile(filepath.Join(dir, "tracked.txt"))
+	ioutil.WriteFile(filepath.Join(dir, "u.txt"), []byte("u"), 0644)
+
+	if _, err := repo.WorkTreeStatus(); err != nil {
+		t.Fatal(err)
+	}
+	cache := repo.loadUntrackedCache()
+	if len(cache.Dirs[""].Untracked) == 0 {
+		t.Fatal("expected u.txt in cached untracked list")
+	}
+
+	// Stage u.txt — index changes, cache becomes stale
+	repo.AddFile(filepath.Join(dir, "u.txt"))
+	s, err := repo.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range s.Untracked {
+		if p == "u.txt" {
+			t.Fatalf("u.txt should not be untracked after being staged, got %v", s.Untracked)
+		}
+	}
+}
+
+// TestStatusTrackedEmptyDir verifies a tracked empty directory is not
+// reported as untracked.
+func TestStatusTrackedEmptyDir(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(dir, "e"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := repo.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddFileToIndex(filepath.Join(dir, "e"), 0, idx); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := repo.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range s.Untracked {
+		if p == "e/" {
+			t.Fatalf("tracked empty dir should not be untracked, got %v", s.Untracked)
+		}
+	}
+}
+
 func TestStatusSkipsLoDir(t *testing.T) {
 	dir, err := ioutil.TempDir("", "lo-test-*")
 	if err != nil {

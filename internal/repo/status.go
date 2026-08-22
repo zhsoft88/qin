@@ -33,6 +33,13 @@ func (r *Repository) WorkTreeStatus() (*Status, error) {
 
 // WorkTreeStatusFiltered is like WorkTreeStatus but allows custom OS filtering.
 // When include and exclude are both nil, the current OS is used as the filter.
+//
+// The scan is split into two phases:
+//
+//  1. Refresh: iterate the OS-visible index entries and lstat each path,
+//     using the mtime/size fast path to skip content hashing.
+//  2. Scan: walk the working tree for untracked files, skipping unchanged
+//     directories via the on-disk untracked cache.
 func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, filterPaths ...string) (*Status, error) {
 	phase := "loading index"
 	fmt.Fprintf(os.Stderr, "\r%s...", phase)
@@ -43,7 +50,9 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 
 	// Racily-clean bound: an entry whose mtime is >= the index's own mtime
 	// may have been modified in the same timestamp tick as the index write,
-	// so it must be re-hashed instead of trusting the stat fast path.
+	// so it must be re-hashed instead of trusting the stat fast path. The
+	// index mtime also gates the untracked cache: any index change invalidates
+	// previously cached untracked lists.
 	var idxMtime int64
 	if fi, err := os.Stat(r.indexPath()); err == nil {
 		idxMtime = fi.ModTime().UnixNano()
@@ -105,10 +114,12 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	// Track all base paths (including non-visible OS variants) for directory tracking
 	phase = "building maps"
 	fmt.Fprintf(os.Stderr, "\r%s...", phase)
+	tracked := make(map[string]bool)
 	trackedDirs := make(map[string]bool)
 	allEntries := make(map[string]IndexEntry)
 	for key, entry := range idx.Entries {
 		path, _ := parseKey(key)
+		tracked[path] = true
 		allEntries[path] = entry
 		for dir := filepath.Dir(path); dir != "."; dir = filepath.Dir(dir) {
 			trackedDirs[filepath.ToSlash(dir)] = true
@@ -119,98 +130,179 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	if err != nil {
 		return nil, err
 	}
-
-	checked := 0
-	walkRoot := r.Path
-	if len(filterPaths) == 1 {
-		walkRoot = filepath.Join(r.Path, filterPaths[0])
+	var ignoreMtime int64
+	if fi, err := os.Stat(filepath.Join(r.Path, ".qinignore")); err == nil {
+		ignoreMtime = fi.ModTime().UnixNano()
 	}
-	filepath.Walk(walkRoot, func(path string, fi os.FileInfo, err error) error {
+
+	// ---- Phase A: refresh tracked entries (modified detection) ----
+	// Uses allVisible (before the committed-filter) so committed-but-changed
+	// files are still checked, like the old single-pass walk did.
+	phase = "comparing worktree"
+	fmt.Fprintf(os.Stderr, "\r%s...", phase)
+	for path, entry := range allVisible {
+		if len(filterPaths) > 0 && !matchFilterPath(path, filterPaths) {
+			continue // not scanned; the deletion check below still applies
+		}
+		fullPath := filepath.Join(r.Path, path)
+		fi, err := os.Lstat(fullPath)
 		if err != nil {
-			return nil
+			continue // deleted — the deletion check below reports it
 		}
-
-		rel, err := filepath.Rel(r.Path, path)
+		// Directory entries (empty dirs, submodules) have no content to hash
+		if IsSubmoduleMode(entry.Mode) || entry.Hash.IsZero() {
+			continue
+		}
+		// Stat fast path: skip the content read+hash when size and mtime
+		// match the index entry and the entry predates the index write.
+		// Symlinks are excluded (their on-disk content can change without
+		// touching the link's own stat). A mismatch only means extra work,
+		// never a missed change.
+		if !IsSymlinkMode(entry.Mode) && entry.Mtime != 0 &&
+			fi.Size() == entry.Size &&
+			fi.ModTime().UnixNano() == entry.Mtime &&
+			entry.Mtime < idxMtime {
+			continue
+		}
+		data, err := ioutil.ReadFile(fullPath)
 		if err != nil {
-			return nil
+			continue
 		}
-		if rel == "." {
-			return nil
+		contentHash := core.HashFromBytes(data)
+		if contentHash != entry.ContentHash {
+			s.Modified = append(s.Modified, path)
 		}
+	}
 
-		if rel == LoDir || (len(rel) > len(LoDir) && rel[:len(LoDir)+1] == LoDir+string(filepath.Separator)) {
-			if fi.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if rel == ".qinignore" {
-			return nil
-		}
-
-		name := filepath.ToSlash(rel)
-
-		checked++
-		phase = "scanning"
-		if checked%100 == 0 || checked == 1 {
-			fmt.Fprintf(os.Stderr, "\rscanned: %d", checked)
-		}
-		if fi.IsDir() {
-			// Skip submodule directories — their content belongs to the submodule repo
-			if entry, ok := allEntries[name]; ok && IsSubmoduleMode(entry.Mode) {
-				return filepath.SkipDir
-			}
-			if !trackedDirs[name] {
-				// No tracked content below — the whole subtree is either
-				// untracked or ignored. Report it once and prune, except
-				// when the dir is ignored but negate rules exist: children
-				// may be re-included, so we must descend to find them.
-				ignored := ignorer.Match(name, true)
-				if ignored && !ignorer.hasNegate {
-					return filepath.SkipDir
-				}
-				if !ignored {
-					s.Untracked = append(s.Untracked, name+"/")
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-
-		if entry, ok := allEntries[name]; ok {
-			// Stat fast path: skip the content read+hash when size and mtime
-			// match the index entry and the entry predates the index write.
-			// Symlinks are excluded (their on-disk content can change without
-			// touching the link's own stat). A mismatch only means extra work,
-			// never a missed change.
-			if !IsSymlinkMode(entry.Mode) && entry.Mtime != 0 &&
-				fi.Size() == entry.Size &&
-				fi.ModTime().UnixNano() == entry.Mtime &&
-				entry.Mtime < idxMtime {
-				return nil
-			}
-			data, err := ioutil.ReadFile(path)
-			if err != nil {
-				return nil
-			}
-			contentHash := core.HashFromBytes(data)
-			if contentHash != entry.ContentHash {
-				s.Modified = append(s.Modified, name)
-			}
-		} else if !ignorer.Match(name, false) {
-			s.Untracked = append(s.Untracked, name)
-		}
-
-		return nil
-	})
-
+	// Deleted check: every visible path (even outside the filter) must exist
 	for path := range allVisible {
 		fullPath := filepath.Join(r.Path, path)
-		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		if _, err := os.Lstat(fullPath); os.IsNotExist(err) {
 			s.Deleted = append(s.Deleted, path)
 		}
 	}
 
+	// ---- Phase B: untracked scan with per-directory cache ----
+	var cache *untrackedCache
+	useCache := len(filterPaths) == 0
+	if useCache {
+		cache = r.loadUntrackedCache()
+		if cache.IndexMtime != idxMtime || cache.IgnoreMtime != ignoreMtime {
+			cache = &untrackedCache{Dirs: make(map[string]*dirCacheEnt)}
+		}
+		cache.IndexMtime = idxMtime
+		cache.IgnoreMtime = ignoreMtime
+	}
+
+	phase = "scanning"
+	fmt.Fprintf(os.Stderr, "\r%s...", phase)
+	checked := 0
+	walkRoot := r.Path
+	rootRel := ""
+	if len(filterPaths) == 1 {
+		walkRoot = filepath.Join(r.Path, filterPaths[0])
+		rootRel = filepath.ToSlash(filterPaths[0])
+	}
+
+	var walk func(absDir, relDir string)
+	walk = func(absDir, relDir string) {
+		checked++
+		if checked%500 == 0 || checked == 1 {
+			fmt.Fprintf(os.Stderr, "\rscanned: %d dirs", checked)
+		}
+		fi, err := os.Stat(absDir)
+		if err != nil {
+			return
+		}
+		dirMtime := fi.ModTime().UnixNano()
+
+		// Cache hit: the dir's own mtime is unchanged, so its untracked
+		// children and child-dir list are exact. Subdirectories are still
+		// visited and validated at their own level — a dir mtime only
+		// changes on direct entry create/delete, so deeper changes don't
+		// invalidate this entry.
+		if useCache {
+			if ent, ok := cache.Dirs[relDir]; ok && ent.Mtime == dirMtime {
+				s.Untracked = append(s.Untracked, ent.Untracked...)
+				for _, d := range ent.Dirs {
+					walk(filepath.Join(absDir, filepath.Base(d)), d)
+				}
+				return
+			}
+		}
+
+		entries, err := ioutil.ReadDir(absDir)
+		if err != nil {
+			return
+		}
+
+		var untrackedChildren []string
+		var dirsToDescend []string
+		for _, e := range entries {
+			name := e.Name()
+			if relDir != "" {
+				name = relDir + "/" + name
+			}
+			if relDir == "" {
+				if name == LoDir {
+					continue
+				}
+				if name == ".qinignore" {
+					continue
+				}
+			}
+			if e.IsDir() {
+				// Skip submodule directories — their content belongs to the submodule repo
+				if entry, ok := allEntries[name]; ok && IsSubmoduleMode(entry.Mode) {
+					continue
+				}
+				// Tracked empty directory — descend without reporting
+				if _, ok := allEntries[name]; ok {
+					dirsToDescend = append(dirsToDescend, name)
+					continue
+				}
+				if !trackedDirs[name] {
+					// No tracked content below — the whole subtree is either
+					// untracked or ignored. Report it once and prune, except
+					// when the dir is ignored but negate rules exist: children
+					// may be re-included, so we must descend to find them.
+					ignored := ignorer.Match(name, true)
+					if ignored && !ignorer.hasNegate {
+						continue
+					}
+					if !ignored {
+						s.Untracked = append(s.Untracked, name+"/")
+						untrackedChildren = append(untrackedChildren, name+"/")
+						continue
+					}
+					// ignored with negate — fall through to descend
+				}
+				dirsToDescend = append(dirsToDescend, name)
+				continue
+			}
+
+			if tracked[name] {
+				continue
+			}
+			if ignorer.Match(name, false) {
+				continue
+			}
+			s.Untracked = append(s.Untracked, name)
+			untrackedChildren = append(untrackedChildren, name)
+		}
+
+		if useCache {
+			cache.Dirs[relDir] = &dirCacheEnt{Mtime: dirMtime, Untracked: untrackedChildren, Dirs: dirsToDescend}
+		}
+		for _, d := range dirsToDescend {
+			walk(filepath.Join(absDir, filepath.Base(d)), d)
+		}
+	}
+	walk(walkRoot, rootRel)
+
+	if useCache {
+		r.saveUntrackedCache(cache)
+	}
 	if checked > 0 {
 		fmt.Fprintf(os.Stderr, "\n")
 	}
