@@ -14,8 +14,9 @@ func TestEntryKeyAndParse(t *testing.T) {
 		wantKey string
 	}{
 		{"a.txt", 0, "a.txt"},
-		{"a.txt", OSID("linux"), "a.txt\x00\x03"},
+		{"a.txt", OSID("linux"), "a.txt\x00\x04"},
 		{"path/to/file.go", OSID("win"), "path/to/file.go\x00\x01"},
+		{"a.txt", OSWin | OSMac, "a.txt\x00\x03"},
 		{"", 0, ""},
 	}
 	for _, tt := range tests {
@@ -75,6 +76,7 @@ func TestParseOSExpr(t *testing.T) {
 		{"*", 0, 0, false},
 		{"unknownos", 0, 0, true},
 		{"!unknownos", 0, 0, true},
+		{"freebsd", 0, 0, true},
 	}
 	for _, tt := range tests {
 		include, exclude, err := ParseOSExpr(tt.expr)
@@ -123,6 +125,28 @@ func TestParseOSExpr(t *testing.T) {
 	}
 }
 
+func TestMaskFromOSExpr(t *testing.T) {
+	win := map[uint8]bool{OSWin: true}
+	winLinux := map[uint8]bool{OSWin: true, OSLinux: true}
+
+	if m := MaskFromOSExpr(nil, nil); m != 0 {
+		t.Errorf("MaskFromOSExpr(nil,nil) = %d, want 0", m)
+	}
+	if m := MaskFromOSExpr(win, nil); m != OSWin {
+		t.Errorf("MaskFromOSExpr(win,nil) = %d, want %d", m, OSWin)
+	}
+	if m := MaskFromOSExpr(winLinux, nil); m != OSWin|OSLinux {
+		t.Errorf("MaskFromOSExpr(win,linux) = %d, want %d", m, OSWin|OSLinux)
+	}
+	// Exclude list — all known bits except the excluded ones
+	if m := MaskFromOSExpr(nil, map[uint8]bool{OSWin: true}); m != OSMac|OSLinux {
+		t.Errorf("MaskFromOSExpr(!win) = %d, want %d", m, OSMac|OSLinux)
+	}
+	if m := MaskFromOSExpr(nil, map[uint8]bool{OSWin: true, OSMac: true}); m != OSLinux {
+		t.Errorf("MaskFromOSExpr(!win,!mac) = %d, want %d", m, OSLinux)
+	}
+}
+
 func TestMatchOSExpr(t *testing.T) {
 	win := OSID("win")
 	linux := OSID("linux")
@@ -150,6 +174,13 @@ func TestMatchOSExpr(t *testing.T) {
 	if MatchOSExpr(linux, map[uint8]bool{win: true}, nil) {
 		t.Error("linux should NOT match include=win")
 	}
+	// multi-bit mask overlaps include
+	if !MatchOSExpr(win|linux, map[uint8]bool{win: true}, nil) {
+		t.Error("win|linux mask should match include=win")
+	}
+	if MatchOSExpr(win|linux, map[uint8]bool{OSID("mac"): true}, nil) {
+		t.Error("win|linux mask should NOT match include=mac")
+	}
 
 	// exclude matching
 	if MatchOSExpr(win, nil, map[uint8]bool{win: true}) {
@@ -157,6 +188,12 @@ func TestMatchOSExpr(t *testing.T) {
 	}
 	if !MatchOSExpr(linux, nil, map[uint8]bool{win: true}) {
 		t.Error("linux should match exclude=win (not excluded)")
+	}
+	if MatchOSExpr(win|linux, nil, map[uint8]bool{win: true}) {
+		t.Error("win|linux mask should NOT match exclude=win")
+	}
+	if !MatchOSExpr(win|linux, nil, map[uint8]bool{OSID("mac"): true}) {
+		t.Error("win|linux mask should match exclude=mac")
 	}
 
 	// exclude takes priority over include
@@ -167,12 +204,13 @@ func TestMatchOSExpr(t *testing.T) {
 
 func TestVisibleEntriesExpr(t *testing.T) {
 	entries := map[string]IndexEntry{
-		"default.txt":          {},
-		"default.txt\x00\x03": {OSS: []uint8{OSID("linux")}},
-		"default.txt\x00\x01": {OSS: []uint8{OSID("win")}},
-		"shared.txt":           {},
-		"linux_only.txt\x00\x03":   {OSS: []uint8{OSID("linux")}},
-		"win_only.txt\x00\x01":     {OSS: []uint8{OSID("win")}},
+		"default.txt":            {},
+		"default.txt\x00\x04":    {OSS: OSLinux},
+		"default.txt\x00\x01":    {OSS: OSWin},
+		"shared.txt":             {},
+		"linux_only.txt\x00\x04": {OSS: OSLinux},
+		"win_only.txt\x00\x01":   {OSS: OSWin},
+		"multi.txt\x00\x05":      {OSS: OSWin | OSLinux},
 	}
 
 	// * — match all
@@ -189,6 +227,9 @@ func TestVisibleEntriesExpr(t *testing.T) {
 	if _, ok := visible["win_only.txt"]; !ok {
 		t.Error("*: expected win_only.txt")
 	}
+	if _, ok := visible["multi.txt"]; !ok {
+		t.Error("*: expected multi.txt")
+	}
 
 	// include=win only
 	visible = VisibleEntriesExpr(entries, map[uint8]bool{OSID("win"): true}, nil)
@@ -200,6 +241,9 @@ func TestVisibleEntriesExpr(t *testing.T) {
 	}
 	if _, ok := visible["shared.txt"]; !ok {
 		t.Error("include=win: expected shared.txt (default)")
+	}
+	if _, ok := visible["multi.txt"]; !ok {
+		t.Error("include=win: multi.txt (win|linux) should be visible")
 	}
 	// OS-specific override
 	if e, ok := visible["default.txt"]; !ok || !osMatch(e.OSS, OSID("win")) {
@@ -217,6 +261,9 @@ func TestVisibleEntriesExpr(t *testing.T) {
 	if _, ok := visible["shared.txt"]; !ok {
 		t.Error("exclude=linux: expected shared.txt (default)")
 	}
+	if _, ok := visible["multi.txt"]; ok {
+		t.Error("exclude=linux: multi.txt (win|linux) should NOT be visible")
+	}
 	if e, ok := visible["default.txt"]; !ok || !osMatch(e.OSS, OSID("win")) {
 		t.Error("exclude=linux: win variant of default.txt should override")
 	}
@@ -224,12 +271,12 @@ func TestVisibleEntriesExpr(t *testing.T) {
 
 func TestVisibleEntries(t *testing.T) {
 	entries := map[string]IndexEntry{
-		"default.txt":                    {},
-		"default.txt\x00\x03":           {OSS: []uint8{OSID("linux")}},
-		"default.txt\x00\x01":           {OSS: []uint8{OSID("win")}},
-		"shared.txt":                     {},
-		"linux_only.txt\x00\x03":        {OSS: []uint8{OSID("linux")}},
-		"win_only.txt\x00\x01":          {OSS: []uint8{OSID("win")}},
+		"default.txt":            {},
+		"default.txt\x00\x04":    {OSS: OSLinux},
+		"default.txt\x00\x01":    {OSS: OSWin},
+		"shared.txt":             {},
+		"linux_only.txt\x00\x04": {OSS: OSLinux},
+		"win_only.txt\x00\x01":   {OSS: OSWin},
 	}
 
 	// On Linux
@@ -267,11 +314,11 @@ func TestVisibleEntries(t *testing.T) {
 
 func TestCollectPaths(t *testing.T) {
 	entries := map[string]IndexEntry{
-		"a.txt":              {},
-		"a.txt\x00\x03":      {},
-		"a.txt\x00\x01":      {},
-		"b.txt":              {},
-		"sub/c.txt":          {},
+		"a.txt":         {},
+		"a.txt\x00\x04": {},
+		"a.txt\x00\x01": {},
+		"b.txt":         {},
+		"sub/c.txt":     {},
 	}
 	paths := collectPaths(entries)
 	m := make(map[string]bool)
@@ -305,20 +352,76 @@ func TestIsKnownOS(t *testing.T) {
 	if IsKnownOS("foobar") {
 		t.Error("expected foobar to be unknown")
 	}
+	if IsKnownOS("freebsd") {
+		t.Error("expected freebsd to be unknown (only win, mac, linux supported)")
+	}
 }
 
 func TestOSIDAndName(t *testing.T) {
-	if id := OSID("linux"); id != 3 {
-		t.Errorf("OSID(linux) = %d, want 3", id)
+	if id := OSID("win"); id != OSWin {
+		t.Errorf("OSID(win) = %d, want %d", id, OSWin)
 	}
-	if name := OSName(3); name != "linux" {
-		t.Errorf("OSName(3) = %q, want %q", name, "linux")
+	if id := OSID("mac"); id != OSMac {
+		t.Errorf("OSID(mac) = %d, want %d", id, OSMac)
+	}
+	if id := OSID("linux"); id != OSLinux {
+		t.Errorf("OSID(linux) = %d, want %d", id, OSLinux)
+	}
+	if name := OSName(OSLinux); name != "linux" {
+		t.Errorf("OSName(4) = %q, want %q", name, "linux")
 	}
 	if name := OSNameOrStar(0); name != "*" {
 		t.Errorf("OSNameOrStar(0) = %q, want %q", name, "*")
 	}
 	if name := OSNameOrStar(OSID("win")); name != "win" {
 		t.Errorf("OSNameOrStar(win) = %q, want %q", name, "win")
+	}
+}
+
+func TestOSNames(t *testing.T) {
+	check := func(mask uint8, want []string) {
+		t.Helper()
+		got := OSNames(mask)
+		if len(got) != len(want) {
+			t.Errorf("OSNames(%d) = %v, want %v", mask, got, want)
+			return
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("OSNames(%d) = %v, want %v", mask, got, want)
+				return
+			}
+		}
+	}
+	check(0, nil)
+	check(OSWin, []string{"win"})
+	check(OSMac, []string{"mac"})
+	check(OSLinux, []string{"linux"})
+	check(OSWin|OSMac, []string{"win", "mac"})
+	check(OSWin|OSLinux, []string{"win", "linux"})
+	check(OSWin|OSMac|OSLinux, []string{"win", "mac", "linux"})
+}
+
+func TestOSMatch(t *testing.T) {
+	// mask 0 matches any OS
+	if !osMatch(0, OSWin) || !osMatch(0, OSMac) || !osMatch(0, OSLinux) {
+		t.Error("mask 0 should match any OS")
+	}
+	// single-bit masks
+	if !osMatch(OSWin, OSWin) || osMatch(OSWin, OSLinux) {
+		t.Error("win mask should match win only")
+	}
+	// multi-bit masks overlap
+	if !osMatch(OSWin|OSLinux, OSWin) || !osMatch(OSWin|OSLinux, OSLinux) || osMatch(OSWin|OSLinux, OSMac) {
+		t.Error("win|linux mask should match win and linux but not mac")
+	}
+	// osExactMatch
+	if !osExactMatch(OSWin, OSWin) || osExactMatch(OSWin|OSLinux, OSWin) || osExactMatch(0, OSWin) {
+		t.Error("osExactMatch should match only a single-bit mask equal to queryOS")
+	}
+	// isOSSpecific
+	if isOSSpecific(0) || !isOSSpecific(OSWin) || !isOSSpecific(OSWin|OSLinux) {
+		t.Error("isOSSpecific should be true for any non-zero mask")
 	}
 }
 
@@ -357,10 +460,10 @@ func TestAddFileWithOS(t *testing.T) {
 	if _, ok := idx.Entries["shared.txt"]; !ok {
 		t.Error("expected shared.txt in index")
 	}
-	if _, ok := idx.Entries["main.go\x00\x03"]; !ok {
+	if _, ok := idx.Entries["main.go\x00\x04"]; !ok {
 		t.Error("expected main.go linux variant in index")
 	}
-	if e := idx.Entries["main.go\x00\x03"]; !osMatch(e.OSS, OSID("linux")) {
+	if e := idx.Entries["main.go\x00\x04"]; !osMatch(e.OSS, OSID("linux")) {
 		t.Errorf("expected OSS=linux, got %v", e.OSS)
 	}
 }
@@ -397,7 +500,7 @@ func TestAddDefaultAndOSSamePath(t *testing.T) {
 	if _, ok := idx.Entries["config.yaml"]; !ok {
 		t.Error("expected default config.yaml in index")
 	}
-	if _, ok := idx.Entries["config.yaml\x00\x03"]; !ok {
+	if _, ok := idx.Entries["config.yaml\x00\x04"]; !ok {
 		t.Error("expected linux config.yaml in index")
 	}
 
@@ -408,7 +511,7 @@ func TestAddDefaultAndOSSamePath(t *testing.T) {
 	}
 	var foundDefault, foundLinux bool
 	for _, e := range tree.Entries {
-		if e.Name == "config.yaml" && len(e.OSS) == 0 {
+		if e.Name == "config.yaml" && e.OSS == 0 {
 			foundDefault = true
 		}
 		if e.Name == "config.yaml" && osMatch(e.OSS, OSID("linux")) {
@@ -439,7 +542,7 @@ func TestAddDefaultAndOSSamePath(t *testing.T) {
 	if _, ok := idx2.Entries["config.yaml"]; !ok {
 		t.Error("expected default config.yaml in index after checkout")
 	}
-	if _, ok := idx2.Entries["config.yaml\x00\x03"]; !ok {
+	if _, ok := idx2.Entries["config.yaml\x00\x04"]; !ok {
 		t.Error("expected linux config.yaml in index after checkout")
 	}
 
@@ -450,7 +553,7 @@ func TestAddDefaultAndOSSamePath(t *testing.T) {
 		t.Error("expected config.yaml in visible entries after checkout")
 	} else if currentOS() == OSID("linux") && !osMatch(e.OSS, OSID("linux")) {
 		t.Error("expected linux variant to be visible on linux")
-	} else if currentOS() != OSID("linux") && len(e.OSS) > 0 {
+	} else if currentOS() != OSID("linux") && e.OSS != 0 {
 		t.Error("expected default variant to be visible on non-linux OS")
 	}
 
@@ -484,7 +587,7 @@ func TestRemoveFileWithOS(t *testing.T) {
 	if _, ok := idx.Entries["f.txt"]; !ok {
 		t.Error("expected default f.txt to remain")
 	}
-	if _, ok := idx.Entries["f.txt\x00\x03"]; ok {
+	if _, ok := idx.Entries["f.txt\x00\x04"]; ok {
 		t.Error("expected linux variant to be removed")
 	}
 
@@ -604,7 +707,7 @@ func TestLazyCloneWithOS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := idx.Entries["f.txt\x00\x03"]; !ok {
+	if _, ok := idx.Entries["f.txt\x00\x04"]; !ok {
 		t.Error("expected linux variant in index after clone")
 	}
 	if _, ok := idx.Entries["f.txt\x00\x01"]; !ok {
@@ -640,7 +743,7 @@ func TestShowOS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry, ok := idx.Entries["f.txt\x00\x03"]
+	entry, ok := idx.Entries["f.txt\x00\x04"]
 	if !ok {
 		t.Fatal("expected linux variant in index")
 	}
@@ -673,43 +776,41 @@ func TestAddFileOSMatch(t *testing.T) {
 	idx, _ := r.LoadIndex()
 	entry, ok := idx.Entries["win.txt\x00\x01"]
 	if !ok {
-		t.Fatal("expected win.txt key with OS=1")
+		t.Fatal("expected win.txt key with OS mask 1")
 	}
 	if !osMatch(entry.OSS, OSID("win")) {
 		t.Fatalf("expected OSS='win', got %v", entry.OSS)
 	}
 
-
-	// Test 2: --os-match '!win' (exclusion)
+	// Test 2: --os-match '!win' (exclusion) → mask mac|linux = 6
 	ioutil.WriteFile(filepath.Join(dir, "notwin.txt"), []byte("not win data"), 0644)
 	if err := r.AddFileOSMatch(filepath.Join(dir, "notwin.txt"), "!win"); err != nil {
 		t.Fatal(err)
 	}
 	idx, _ = r.LoadIndex()
-	entry, ok = idx.Entries["notwin.txt"]
+	entry, ok = idx.Entries["notwin.txt\x00\x06"]
 	if !ok {
-		t.Fatal("expected notwin.txt with bare key")
+		t.Fatal("expected notwin.txt key with mask 6 (mac|linux)")
 	}
 	if osMatch(entry.OSS, OSID("win")) {
 		t.Fatalf("expected OSS to exclude win, got %v", entry.OSS)
 	}
 
-
-	// Test 3: --os-match 'win,linux' (multi include)
+	// Test 3: --os-match 'win,linux' (multi include) → mask win|linux = 5
 	ioutil.WriteFile(filepath.Join(dir, "multi.txt"), []byte("multi data"), 0644)
 	if err := r.AddFileOSMatch(filepath.Join(dir, "multi.txt"), "win,linux"); err != nil {
 		t.Fatal(err)
 	}
 	idx, _ = r.LoadIndex()
-	entry, ok = idx.Entries["multi.txt"]
+	entry, ok = idx.Entries["multi.txt\x00\x05"]
 	if !ok {
-		t.Fatal("expected multi.txt with bare key")
+		t.Fatal("expected multi.txt key with mask 5 (win|linux)")
 	}
 	if !osMatch(entry.OSS, OSID("win")) || !osMatch(entry.OSS, OSID("linux")) {
 		t.Fatalf("expected OSS='win,linux', got %v", entry.OSS)
 	}
 
-	// Test 4: Match via indexEntryMatchOS
+	// Test 4: multi-OS mask matches each included OS
 	if !osMatch(entry.OSS, OSID("win")) {
 		t.Error("entry with expr 'win,linux' should match win")
 	}
@@ -721,7 +822,7 @@ func TestAddFileOSMatch(t *testing.T) {
 	}
 
 	// Test 5: Exclusion matching
-	notwinEntry, ok := idx.Entries["notwin.txt"]
+	notwinEntry, ok := idx.Entries["notwin.txt\x00\x06"]
 	if !ok {
 		t.Fatal("expected notwin.txt in index")
 	}

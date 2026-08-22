@@ -10,9 +10,10 @@ import (
 
 // ResetCommit moves HEAD to the given commit and resets index/working tree
 // according to the mode:
-//   "soft"  — only move HEAD
-//   "mixed" — move HEAD + reset index (default)
-//   "hard"  — move HEAD + reset index + reset working tree
+//
+//	"soft"  — only move HEAD
+//	"mixed" — move HEAD + reset index (default)
+//	"hard"  — move HEAD + reset index + reset working tree
 func (r *Repository) ResetCommit(hash core.Hash, mode string) error {
 	// Resolve HEAD to get current branch
 	head, err := r.ReadHEAD()
@@ -47,7 +48,7 @@ func (r *Repository) ResetCommit(hash core.Hash, mode string) error {
 	// Build new entries from tree
 	newEntries := make(map[string]TreeEntry)
 	for _, e := range tree.Entries {
-		key := entryKey(e.Name, osIDForKey(e.OSS))
+		key := entryKey(e.Name, e.OSS)
 		newEntries[key] = e
 	}
 
@@ -76,7 +77,7 @@ func (r *Repository) ResetCommit(hash core.Hash, mode string) error {
 			for _, e := range group {
 				if osMatch(e.OSS, cOS) {
 					winner = &e
-					if len(e.OSS) == 1 && e.OSS[0] == cOS {
+					if osExactMatch(e.OSS, cOS) {
 						break
 					}
 				}
@@ -111,7 +112,7 @@ func (r *Repository) buildIndexFromTreeEntries(entries map[string]TreeEntry) err
 			ContentHash: contentHash,
 			Size:        e.Size,
 			Mode:        e.Mode,
-			OSS:              e.OSS,
+			OSS:         e.OSS,
 		}
 	}
 	return r.SaveIndex(newIndex)

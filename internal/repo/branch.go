@@ -77,7 +77,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 		for _, e := range group.entries {
 			if osMatch(e.OSS, cOS) {
 				winner = &e
-				if len(e.OSS) == 1 && e.OSS[0] == cOS {
+				if osExactMatch(e.OSS, cOS) {
 					break // exact OS match is the best possible
 				}
 			}
@@ -85,12 +85,12 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 		if winner == nil {
 			// No matching OS variant — still add to index, skip working tree
 			for _, e := range group.entries {
-				key := entryKey(name, osIDForKey(e.OSS))
+				key := entryKey(name, e.OSS)
 				newIndex.Entries[key] = IndexEntry{
 					Hash: e.Hash,
 					Size: e.Size,
 					Mode: e.Mode,
-					OSS:    e.OSS,
+					OSS:  e.OSS,
 				}
 			}
 			continue
@@ -105,12 +105,12 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 				return fmt.Errorf("create submodule dir %s: %w", name, err)
 			}
 			for _, e := range group.entries {
-				key := entryKey(name, osIDForKey(e.OSS))
+				key := entryKey(name, e.OSS)
 				newIndex.Entries[key] = IndexEntry{
 					Hash: e.Hash,
 					Size: e.Size,
 					Mode: e.Mode,
-					OSS:    e.OSS,
+					OSS:  e.OSS,
 				}
 			}
 			continue
@@ -121,7 +121,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 			if err := os.MkdirAll(fullPath, 0755); err != nil {
 				return fmt.Errorf("create dir %s: %w", name, err)
 			}
-			newIndex.Entries[entryKey(name, osIDForKey(winner.OSS))] = IndexEntry{
+			newIndex.Entries[entryKey(name, winner.OSS)] = IndexEntry{
 				Mode: DirMode,
 				OSS:  winner.OSS,
 			}
@@ -133,7 +133,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 			if err := os.MkdirAll(fullPath, 0755); err != nil {
 				return fmt.Errorf("create dir %s: %w", name, err)
 			}
-			newIndex.Entries[entryKey(name, osIDForKey(winner.OSS))] = IndexEntry{
+			newIndex.Entries[entryKey(name, winner.OSS)] = IndexEntry{
 				Mode: DirMode,
 				OSS:  winner.OSS,
 			}
@@ -176,7 +176,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 
 		// Add all OS variants to index (default + OS-specific)
 		for _, e := range group.entries {
-			key := entryKey(name, osIDForKey(e.OSS))
+			key := entryKey(name, e.OSS)
 			var contentHash core.Hash
 			if e.Hash == winner.Hash {
 				contentHash = core.HashFromBytes(fileData)

@@ -28,12 +28,12 @@ func writeFileFromEntry(path string, data []byte, mode uint32) error {
 
 // IndexEntry represents a staged file.
 type IndexEntry struct {
-	Hash        core.Hash `json:"hash"`          // object hash (for loading from store)
-	ContentHash core.Hash `json:"content_hash"`  // raw file content hash (for change detection)
+	Hash        core.Hash `json:"hash"`         // object hash (for loading from store)
+	ContentHash core.Hash `json:"content_hash"` // raw file content hash (for change detection)
 	Size        int64     `json:"size"`
 	Mode        uint32    `json:"mode"`
 	Lazy        bool      `json:"lazy,omitempty"` // true if chunks not yet fetched (lfs placeholder)
-	OSS []uint8 `json:"oss,omitempty"`     // list of OS IDs the entry applies to; empty = all OSes
+	OSS         uint8     `json:"oss,omitempty"`  // OS bitmask: 1=win, 2=mac, 4=linux; 0 = all OSes
 }
 
 // Index is the staging area, mapping repo-relative paths to entries.
@@ -82,7 +82,7 @@ func (r *Repository) SaveIndex(idx *Index) error {
 // AddFile reads a file from disk, stores it as an object, and adds it to the index
 // as a default (all-OS) entry.
 func (r *Repository) AddFile(filePath string) error {
-	return r.addFileInternal(filePath, 0, nil)
+	return r.addFileInternal(filePath, 0)
 }
 
 // AddFileOS reads a file from disk, stores it as an object, and adds it to the
@@ -92,59 +92,41 @@ func (r *Repository) AddFileOS(filePath, osTag string) error {
 	if osTag != "" && id == 0 {
 		return fmt.Errorf("unknown OS: %s", osTag)
 	}
-	return r.addFileInternal(filePath, id, []uint8{id})
+	return r.addFileInternal(filePath, id)
 }
 
 // AddFileOSMatch adds a file with an OS expression. The expression is resolved
-// to a list of OS IDs stored in the entry's OSS field. Single-OS expressions use
-// that OS ID as the key discriminator; complex expressions use key 0.
+// to an OS bitmask stored in the entry's OSS field; the mask is also used as
+// the key discriminator.
 func (r *Repository) AddFileOSMatch(filePath, expr string) error {
 	if expr == "" || expr == "*" {
-		return r.addFileInternal(filePath, 0, nil)
+		return r.addFileInternal(filePath, 0)
 	}
 	include, exclude, err := ParseOSExpr(expr)
 	if err != nil {
 		return fmt.Errorf("invalid OS expression: %w", err)
 	}
-	var oss []uint8
-	var osID uint8
-	if len(include) > 0 && len(exclude) == 0 {
-		// Simple include list
-		for id := range include {
-			oss = append(oss, id)
-		}
-		if len(oss) == 1 {
-			osID = oss[0]
-		}
-	} else if len(exclude) > 0 {
-		// Exclude list — oss = all known OSes except excluded
-		for _, name := range KnownOSes {
-			id := OSID(name)
-			if !exclude[id] {
-				oss = append(oss, id)
-			}
-		}
-	}
-	return r.addFileInternal(filePath, osID, oss)
+	return r.addFileInternal(filePath, MaskFromOSExpr(include, exclude))
 }
 
 // addFileInternal is the shared implementation for AddFile, AddFileOS, and AddFileOSMatch.
 // It loads the index, processes one file, and saves — use AddFiles/AddFilesOSMatch
 // for batch operations that avoid per-file index save.
-func (r *Repository) addFileInternal(filePath string, osID uint8, oss []uint8) error {
+func (r *Repository) addFileInternal(filePath string, oss uint8) error {
 	idx, err := r.LoadIndex()
 	if err != nil {
 		return err
 	}
-	if err := r.AddFileToIndex(filePath, osID, oss, idx); err != nil {
+	if err := r.AddFileToIndex(filePath, oss, idx); err != nil {
 		return err
 	}
 	return r.SaveIndex(idx)
 }
 
-// addFileToIndex processes a single file and adds it to a pre-loaded index.
+// AddFileToIndex processes a single file and adds it to a pre-loaded index.
+// oss is the OS bitmask (0 = all OSes) and is used as the key discriminator.
 // Does NOT save the index — caller must call SaveIndex.
-func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, idx *Index) error {
+func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) error {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return fmt.Errorf("resolve path: %w", err)
@@ -168,7 +150,7 @@ func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, id
 		if !empty {
 			return fmt.Errorf("cannot add non-empty directory: %s", filePath)
 		}
-		key := entryKey(filepath.ToSlash(relPath), osID)
+		key := entryKey(filepath.ToSlash(relPath), oss)
 		idx.Entries[key] = IndexEntry{
 			Mode: DirMode,
 			OSS:  oss,
@@ -218,7 +200,7 @@ func (r *Repository) AddFileToIndex(filePath string, osID uint8, oss []uint8, id
 
 	mode := uint32(fi.Mode())
 
-	key := entryKey(filepath.ToSlash(relPath), osID)
+	key := entryKey(filepath.ToSlash(relPath), oss)
 	idx.Entries[key] = IndexEntry{
 		Hash:        h,
 		ContentHash: contentHash,
@@ -250,9 +232,13 @@ func (r *Repository) AddFiles(files []string) error {
 
 // AddFilesOSMatch adds multiple files with an OS expression in a batch.
 func (r *Repository) AddFilesOSMatch(files []string, expr string) error {
-	include, exclude, err := ParseOSExpr(expr)
-	if err != nil {
-		return fmt.Errorf("invalid OS expression: %w", err)
+	var mask uint8
+	if expr != "" && expr != "*" {
+		include, exclude, err := ParseOSExpr(expr)
+		if err != nil {
+			return fmt.Errorf("invalid OS expression: %w", err)
+		}
+		mask = MaskFromOSExpr(include, exclude)
 	}
 
 	idx, err := r.LoadIndex()
@@ -261,27 +247,7 @@ func (r *Repository) AddFilesOSMatch(files []string, expr string) error {
 	}
 
 	for _, f := range files {
-		var oss []uint8
-		var osID uint8
-		if expr != "" && expr != "*" {
-			include, exclude, _ = ParseOSExpr(expr)
-			if len(include) > 0 && len(exclude) == 0 {
-				for id := range include {
-					oss = append(oss, id)
-				}
-				if len(oss) == 1 {
-					osID = oss[0]
-				}
-			} else if len(exclude) > 0 {
-				for _, name := range KnownOSes {
-					id := OSID(name)
-					if !exclude[id] {
-						oss = append(oss, id)
-					}
-				}
-			}
-		}
-		if err := r.AddFileToIndex(f, osID, oss, idx); err != nil {
+		if err := r.AddFileToIndex(f, mask, idx); err != nil {
 			return fmt.Errorf("add %s: %w", f, err)
 		}
 	}

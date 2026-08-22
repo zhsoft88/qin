@@ -1,7 +1,10 @@
 package main
+
 import (
 	"flag"
 	"fmt"
+	"github.com/zhsoft88/qin/internal/core"
+	"github.com/zhsoft88/qin/internal/repo"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -9,9 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"github.com/zhsoft88/qin/internal/core"
-	"github.com/zhsoft88/qin/internal/repo"
 )
+
 // stringSlice is a flag.Value that collects multiple values into a slice.
 type stringSlice []string
 
@@ -22,10 +24,11 @@ func (s *stringSlice) Set(v string) error {
 }
 
 type command struct {
-	name    string
-	desc    string
-	run     func(args []string) error
+	name string
+	desc string
+	run  func(args []string) error
 }
+
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
 		fmt.Println("lo version " + core.Version)
@@ -36,39 +39,39 @@ func main() {
 		os.Exit(1)
 	}
 	cmds := map[string]command{
-		"init":     {"init", "Initialize a new repository", runInit},
-		"add":      {"add", "Stage file(s) for commit", runAdd},
-		"rm":       {"rm", "Remove staged file(s)", runRm},
-		"commit":   {"commit", "Create a commit from staged files", runCommit},
-		"log":      {"log", "Show commit history [--graph]", runLog},
-		"status":   {"status", "Show working tree status", runStatus},
-		"cat":      {"cat", "Print an object's content", runCat},
-		"ls":       {"ls", "List staged files", runLs},
-		"checkout": {"checkout", "Restore files from a commit", runCheckout},
-		"switch":   {"switch", "Switch to an existing branch", runSwitch},
-		"branch":   {"branch", "List, create, or delete branches", runBranch},
-		"tag":      {"tag", "List or create tags", runTag},
-		"diff":     {"diff", "Show file-level changes", runDiff},
-		"merge":    {"merge", "Merge a branch into the current branch", runMerge},
-		"rebase":   {"rebase", "Rebase current branch onto another branch", runRebase},
+		"init":        {"init", "Initialize a new repository", runInit},
+		"add":         {"add", "Stage file(s) for commit", runAdd},
+		"rm":          {"rm", "Remove staged file(s)", runRm},
+		"commit":      {"commit", "Create a commit from staged files", runCommit},
+		"log":         {"log", "Show commit history [--graph]", runLog},
+		"status":      {"status", "Show working tree status", runStatus},
+		"cat":         {"cat", "Print an object's content", runCat},
+		"ls":          {"ls", "List staged files", runLs},
+		"checkout":    {"checkout", "Restore files from a commit", runCheckout},
+		"switch":      {"switch", "Switch to an existing branch", runSwitch},
+		"branch":      {"branch", "List, create, or delete branches", runBranch},
+		"tag":         {"tag", "List or create tags", runTag},
+		"diff":        {"diff", "Show file-level changes", runDiff},
+		"merge":       {"merge", "Merge a branch into the current branch", runMerge},
+		"rebase":      {"rebase", "Rebase current branch onto another branch", runRebase},
 		"cherry-pick": {"cherry-pick", "Apply changes from an existing commit", runCherryPick},
-		"stash":    {"stash", "Stash or pop working tree changes", runStash},
-		"remote":   {"remote", "Manage remotes", runRemote},
-		"push":     {"push", "Push to remote", runPush},
-		"fetch":    {"fetch", "Fetch from remote", runFetch},
-		"pull":     {"pull", "Pull from remote and merge", runPull},
-		"clone":     {"clone", "Clone a repository [--lazy]", runClone},
-		"lfs":       {"lfs", "Manage large files (status, pull)", runLfs},
-		"serve":      {"serve", "Start HTTP server for remote access [--addr] [--base-path]", runServe},
-		"show":      {"show", "Show file content for the given OS [--os <os>]", runShow},
-		"config":    {"config", "Get or set configuration values [--unset]", runConfig},
-		"reset":     {"reset", "Reset HEAD [--soft | --mixed | --hard] [<commit>]", runReset},
-		"restore":   {"restore", "Restore working tree or index files", runRestore},
-		"apply":     {"apply", "Apply a patch to the working tree", runApply},
-		"submodule":  {"submodule", "Manage submodules", runSubmodule},
-		"lost-found": {"lost-found", "List dangling (unreachable) commits", runLostFound},
-		"gc":         {"gc", "Prune dangling objects to reclaim space", runGC},
-		"version":    {"version", "Show version information", runVersion},
+		"stash":       {"stash", "Stash or pop working tree changes", runStash},
+		"remote":      {"remote", "Manage remotes", runRemote},
+		"push":        {"push", "Push to remote", runPush},
+		"fetch":       {"fetch", "Fetch from remote", runFetch},
+		"pull":        {"pull", "Pull from remote and merge", runPull},
+		"clone":       {"clone", "Clone a repository [--lazy]", runClone},
+		"lfs":         {"lfs", "Manage large files (status, pull)", runLfs},
+		"serve":       {"serve", "Start HTTP server for remote access [--addr] [--base-path]", runServe},
+		"show":        {"show", "Show file content for the given OS [--os <os>]", runShow},
+		"config":      {"config", "Get or set configuration values [--unset]", runConfig},
+		"reset":       {"reset", "Reset HEAD [--soft | --mixed | --hard] [<commit>]", runReset},
+		"restore":     {"restore", "Restore working tree or index files", runRestore},
+		"apply":       {"apply", "Apply a patch to the working tree", runApply},
+		"submodule":   {"submodule", "Manage submodules", runSubmodule},
+		"lost-found":  {"lost-found", "List dangling (unreachable) commits", runLostFound},
+		"gc":          {"gc", "Prune dangling objects to reclaim space", runGC},
+		"version":     {"version", "Show version information", runVersion},
 	}
 	cmd, ok := cmds[os.Args[1]]
 	if !ok {
@@ -123,6 +126,7 @@ Commands:
 
 OS identifiers: win, mac, linux, freebsd, netbsd, openbsd, dragonfly, solaris, android`)
 }
+
 // ---- init ----
 func runInit(args []string) error {
 	path := "."
@@ -143,6 +147,7 @@ func runInit(args []string) error {
 	fmt.Printf("initialized empty repository at %s\n", r.Path)
 	return nil
 }
+
 // ---- add ----
 func runAdd(args []string) error {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
@@ -211,6 +216,7 @@ func runAdd(args []string) error {
 	}
 	return nil
 }
+
 // addFileOrDir adds a file or directory recursively (default OS).
 func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
 	fi, err := os.Stat(path)
@@ -221,13 +227,15 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
-		if err := r.AddFileToIndex(path, 0, nil, idx); err != nil {
+		if err := r.AddFileToIndex(path, 0, idx); err != nil {
 			return err
 		}
 		(*added)++
 		display := relPath(r, path)
 		cd := 1
-		for n := *added; n >= 10; n /= 10 { cd++ }
+		for n := *added; n >= 10; n /= 10 {
+			cd++
+		}
 		w := repo.TermWidth()
 		if w <= 0 {
 			w = 80
@@ -262,13 +270,15 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		return err
 	}
 	if len(entries) == 0 {
-		if err := r.AddFileToIndex(path, 0, nil, idx); err != nil {
+		if err := r.AddFileToIndex(path, 0, idx); err != nil {
 			return err
 		}
 		(*added)++
 		display := relPath(r, path) + "/"
 		cd := 1
-		for n := *added; n >= 10; n /= 10 { cd++ }
+		for n := *added; n >= 10; n /= 10 {
+			cd++
+		}
 		w := repo.TermWidth()
 		if w <= 0 {
 			w = 80
@@ -285,7 +295,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			keep := max - 3
 			if keep > 0 {
 				first := (keep + 1) // 2
-				last := keep // 2
+				last := keep        // 2
 				display = display[:first] + "..." + display[len(display)-last:]
 			} else {
 				display = display[:max]
@@ -309,6 +319,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 	}
 	return nil
 }
+
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
 func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
 	fi, err := os.Stat(path)
@@ -320,36 +331,23 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			return nil
 		}
 
-		var oss []uint8
-		var osID uint8
+		var mask uint8
 		if expr != "" && expr != "*" {
 			inc, exc, err := repo.ParseOSExpr(expr)
 			if err != nil {
 				return fmt.Errorf("invalid OS expression: %w", err)
 			}
-			if len(inc) > 0 && len(exc) == 0 {
-				for id := range inc {
-					oss = append(oss, id)
-				}
-				if len(oss) == 1 {
-					osID = oss[0]
-				}
-			} else if len(exc) > 0 {
-				for _, name := range repo.KnownOSes {
-					id := repo.OSID(name)
-					if !exc[id] {
-						oss = append(oss, id)
-					}
-				}
-			}
+			mask = repo.MaskFromOSExpr(inc, exc)
 		}
-		if err := r.AddFileToIndex(path, osID, oss, idx); err != nil {
+		if err := r.AddFileToIndex(path, mask, idx); err != nil {
 			return err
 		}
 		(*added)++
 		display := relPath(r, path)
 		cd := 1
-		for n := *added; n >= 10; n /= 10 { cd++ }
+		for n := *added; n >= 10; n /= 10 {
+			cd++
+		}
 		w := repo.TermWidth()
 		if w <= 0 {
 			w = 80
@@ -385,13 +383,15 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		return err
 	}
 	if len(entries) == 0 {
-		if err := r.AddFileToIndex(path, 0, nil, idx); err != nil {
+		if err := r.AddFileToIndex(path, 0, idx); err != nil {
 			return err
 		}
 		(*added)++
 		display := relPath(r, path) + "/"
 		cd := 1
-		for n := *added; n >= 10; n /= 10 { cd++ }
+		for n := *added; n >= 10; n /= 10 {
+			cd++
+		}
 		w := repo.TermWidth()
 		if w <= 0 {
 			w = 80
@@ -408,7 +408,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			keep := max - 3
 			if keep > 0 {
 				first := (keep + 1) // 2
-				last := keep // 2
+				last := keep        // 2
 				display = display[:first] + "..." + display[len(display)-last:]
 			} else {
 				display = display[:max]
@@ -468,6 +468,7 @@ func expandExcludeFiles(excludes []string, repoPath string) ([]string, error) {
 	}
 	return out, nil
 }
+
 // expandArgFiles is like expandExcludeFiles but silently falls back
 // to the literal path when the file doesn't exist.
 func expandArgFiles(args []string, repoPath string) []string {
@@ -493,7 +494,6 @@ func expandArgFiles(args []string, repoPath string) []string {
 	}
 	return out
 }
-
 
 func pathExcluded(r *repo.Repository, path string, excludes []string) bool {
 	return matchExcludes(r, path, excludes, false)
@@ -595,6 +595,7 @@ func clearLine() {
 	}
 	fmt.Fprintf(os.Stdout, "\n%-*s\n", w-2, " ")
 }
+
 // ---- rm ----
 func runRm(args []string) error {
 	cached := false
@@ -682,6 +683,7 @@ func runRm(args []string) error {
 	}
 	return nil
 }
+
 // ---- commit ----
 func runCommit(args []string) error {
 	fs := flag.NewFlagSet("commit", flag.ExitOnError)
@@ -714,6 +716,7 @@ func runCommit(args []string) error {
 	fmt.Printf("committed: %s\n", h.Short())
 	return nil
 }
+
 // ---- log ----
 func runLog(args []string) error {
 	fs := flag.NewFlagSet("log", flag.ExitOnError)
@@ -775,6 +778,7 @@ func runLog(args []string) error {
 	}
 	return nil
 }
+
 // ---- status ----
 func runStatus(args []string) error {
 	r, err := findRepo()
@@ -822,15 +826,9 @@ func runStatus(args []string) error {
 		sort.Strings(paths)
 		for _, p := range paths {
 			entry := s.Staged[p]
-			osTag := ""
-			if len(entry.OSS) > 0 {
-				names := make([]string, len(entry.OSS))
-				for i, id := range entry.OSS {
-					names[i] = repo.OSName(id)
-				}
-				osTag = " [" + strings.Join(names, ",") + "]"
-			} else {
-				osTag = " [*]"
+			osTag := " [*]"
+			if entry.OSS != 0 {
+				osTag = " [" + strings.Join(repo.OSNames(entry.OSS), ",") + "]"
 			}
 			fmt.Printf("%-20s %s bytes  %s%s\n", p, humanSize(entry.Size), entry.Hash.Short(), osTag)
 		}
@@ -858,6 +856,7 @@ func runStatus(args []string) error {
 	}
 	return nil
 }
+
 // ---- cat ----
 func runCat(args []string) error {
 	if len(args) == 0 {
@@ -885,6 +884,7 @@ func runCat(args []string) error {
 	fmt.Println(string(content))
 	return nil
 }
+
 // ---- ls ----
 func runLs(args []string) error {
 	r, err := findRepo()
@@ -901,36 +901,31 @@ func runLs(args []string) error {
 	}
 
 	// Show all files regardless of OS
-for key, entry := range files {
-	path, osID := repo.ParseKey(key)
-	osTag := "*"
-	if osID != 0 {
-		osTag = repo.OSName(osID)
-	} else if len(entry.OSS) > 0 {
-		names := make([]string, len(entry.OSS))
-		for i, id := range entry.OSS {
-			names[i] = repo.OSName(id)
+	for key, entry := range files {
+		path, osID := repo.ParseKey(key)
+		osTag := "*"
+		if osID != 0 {
+			osTag = strings.Join(repo.OSNames(osID), ",")
 		}
-		osTag = strings.Join(names, ",")
-	}
-	// Chunk count
-	chunks := 0
-	threshold := int64(r.Config.Core.ChunkThreshold)
-	if entry.Size >= threshold {
-		if objType, err := r.ObjectType(entry.Hash); err == nil && objType == core.ObjectChunkManifest {
-			if manifest, err := r.LoadChunkManifest(entry.Hash); err == nil {
-				chunks = len(manifest.Chunks)
+		// Chunk count
+		chunks := 0
+		threshold := int64(r.Config.Core.ChunkThreshold)
+		if entry.Size >= threshold {
+			if objType, err := r.ObjectType(entry.Hash); err == nil && objType == core.ObjectChunkManifest {
+				if manifest, err := r.LoadChunkManifest(entry.Hash); err == nil {
+					chunks = len(manifest.Chunks)
+				}
 			}
 		}
+		chunkInfo := ""
+		if chunks > 0 {
+			chunkInfo = fmt.Sprintf("  [%d chunks]", chunks)
+		}
+		fmt.Printf("%s  %s  [%s]  %s%s\n", entry.Hash.Short(), humanSize(entry.Size), osTag, path, chunkInfo)
 	}
-	chunkInfo := ""
-	if chunks > 0 {
-		chunkInfo = fmt.Sprintf("  [%d chunks]", chunks)
-	}
-	fmt.Printf("%s  %s  [%s]  %s%s\n", entry.Hash.Short(), humanSize(entry.Size), osTag, path, chunkInfo)
+	return nil
 }
-return nil
-}
+
 // ---- checkout ----
 func runCheckout(args []string) error {
 	if len(args) == 0 {
@@ -950,6 +945,7 @@ func runCheckout(args []string) error {
 	fmt.Printf("checked out: %s\n", h.Short())
 	return nil
 }
+
 // ---- branch ----
 func runBranch(args []string) error {
 	r, err := findRepo()
@@ -986,6 +982,7 @@ func runBranch(args []string) error {
 	fmt.Printf("created branch: %s\n", args[0])
 	return nil
 }
+
 // ---- switch ----
 func runSwitch(args []string) error {
 	if len(args) == 0 {
@@ -1001,6 +998,7 @@ func runSwitch(args []string) error {
 	fmt.Printf("switched to branch: %s\n", args[0])
 	return nil
 }
+
 // ---- tag ----
 func runTag(args []string) error {
 	r, err := findRepo()
@@ -1038,6 +1036,7 @@ func runTag(args []string) error {
 	fmt.Printf("created tag: %s\n", name)
 	return nil
 }
+
 // ---- diff ----
 func runDiff(args []string) error {
 	r, err := findRepo()
@@ -1113,6 +1112,7 @@ func runDiff(args []string) error {
 	}
 	return nil
 }
+
 // ---- merge ----
 func runMerge(args []string) error {
 	if len(args) == 0 {
@@ -1144,6 +1144,7 @@ func runMerge(args []string) error {
 	}
 	return nil
 }
+
 // ---- rebase ----
 func runRebase(args []string) error {
 	if len(args) == 0 {
@@ -1159,6 +1160,7 @@ func runRebase(args []string) error {
 	fmt.Printf("rebased onto %s\n", args[0])
 	return nil
 }
+
 // ---- cherry-pick ----
 func runCherryPick(args []string) error {
 	if len(args) == 0 {
@@ -1178,6 +1180,7 @@ func runCherryPick(args []string) error {
 	fmt.Printf("cherry-picked: %s\n", h.Short())
 	return nil
 }
+
 // ---- stash ----
 func runStash(args []string) error {
 	r, err := findRepo()
@@ -1211,6 +1214,7 @@ func runStash(args []string) error {
 	fmt.Println("saved stash")
 	return nil
 }
+
 // ---- remote ----
 func runRemote(args []string) error {
 	r, err := findRepo()
@@ -1261,6 +1265,7 @@ func runRemote(args []string) error {
 	}
 	return nil
 }
+
 // ---- push ----
 func runPush(args []string) error {
 	r, err := findRepo()
@@ -1276,6 +1281,7 @@ func runPush(args []string) error {
 	}
 	return nil
 }
+
 // ---- fetch ----
 func runFetch(args []string) error {
 	r, err := findRepo()
@@ -1292,6 +1298,7 @@ func runFetch(args []string) error {
 	fmt.Printf("fetched from %s\n", remote)
 	return nil
 }
+
 // ---- pull ----
 func runPull(args []string) error {
 	r, err := findRepo()
@@ -1320,6 +1327,7 @@ func runPull(args []string) error {
 	}
 	return nil
 }
+
 // ---- clone ----
 func runClone(args []string) error {
 	lazy := false
@@ -1353,6 +1361,7 @@ func runClone(args []string) error {
 	fmt.Printf("cloned into %s\n", r.Path)
 	return nil
 }
+
 // ---- lfs ----
 func runLfs(args []string) error {
 	if len(args) == 0 {
@@ -1443,6 +1452,7 @@ func runLfsPull(args []string) error {
 	}
 	return nil
 }
+
 // ---- show ----
 func runShow(args []string) error {
 	if len(args) == 0 {
@@ -1509,6 +1519,7 @@ func runShow(args []string) error {
 	}
 	return nil
 }
+
 // ---- serve ----
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
@@ -1529,6 +1540,7 @@ func runServe(args []string) error {
 	fmt.Printf("serving %s on %s\n", r.Path, *addr)
 	return http.ListenAndServe(*addr, http.HandlerFunc(r.ServeHTTP))
 }
+
 // ---- config ----
 
 func runConfig(args []string) error {
@@ -1679,7 +1691,6 @@ func runRestore(args []string) error {
 	}
 	return nil
 }
-
 
 func runApply(args []string) error {
 	r, err := findRepo()

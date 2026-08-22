@@ -19,9 +19,9 @@ type DiffFile struct {
 	OldSize    int64
 	NewSize    int64
 	Type       DiffType
-	OS         uint8    // OS ID for OS-specific entries; 0 means all OSes
-	OldContent []byte   // old content (for text diff display; empty if too large)
-	NewContent []byte   // new content (for text diff display; empty if too large)
+	OS         uint8  // OS ID for OS-specific entries; 0 means all OSes
+	OldContent []byte // old content (for text diff display; empty if too large)
+	NewContent []byte // new content (for text diff display; empty if too large)
 }
 
 // DiffType classifies a file change.
@@ -48,7 +48,7 @@ func (d DiffType) String() string {
 
 // Diff holds the result of comparing two trees.
 type Diff struct {
-	Files       []DiffFile
+	Files    []DiffFile
 	maxSize  int64 // from config: content diff size limit
 	maxLines int   // from config: line diff line limit
 }
@@ -204,7 +204,7 @@ func (r *Repository) DiffIndex() (*Diff, error) {
 
 	headMap := make(map[string]TreeEntry, len(headTree.Entries))
 	for _, e := range headTree.Entries {
-		headMap[entryKey(e.Name, osIDForKey(e.OSS))] = e
+		headMap[entryKey(e.Name, e.OSS)] = e
 	}
 
 	idx, err := r.LoadIndex()
@@ -290,7 +290,7 @@ func (r *Repository) commitTree(hash core.Hash) (map[string]TreeEntry, error) {
 	}
 	entries := make(map[string]TreeEntry, len(tree.Entries))
 	for _, e := range tree.Entries {
-		entries[entryKey(e.Name, osIDForKey(e.OSS))] = e
+		entries[entryKey(e.Name, e.OSS)] = e
 	}
 	return entries, nil
 }

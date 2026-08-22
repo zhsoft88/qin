@@ -30,11 +30,11 @@ func (r *Repository) Stash() error {
 	for path, entry := range idx.Entries {
 		cleanPath, _ := parseKey(path)
 		treeEntries = append(treeEntries, TreeEntry{
-			Name:   cleanPath,
-			Hash:   entry.Hash,
-			Size:   entry.Size,
-			Mode:   entry.Mode,
-			OSS:    entry.OSS,
+			Name: cleanPath,
+			Hash: entry.Hash,
+			Size: entry.Size,
+			Mode: entry.Mode,
+			OSS:  entry.OSS,
 		})
 	}
 
@@ -130,7 +130,7 @@ func (r *Repository) StashPop() error {
 		for _, e := range group.entries {
 			if osMatch(e.OSS, cOS) {
 				winner = &e
-				if len(e.OSS) == 1 && e.OSS[0] == cOS {
+				if osExactMatch(e.OSS, cOS) {
 					break
 				}
 			}
@@ -138,12 +138,12 @@ func (r *Repository) StashPop() error {
 		if winner == nil {
 			// No matching OS variant — add to index, skip working tree
 			for _, e := range group.entries {
-				key := entryKey(name, osIDForKey(e.OSS))
+				key := entryKey(name, e.OSS)
 				newIndex.Entries[key] = IndexEntry{
 					Hash: e.Hash,
 					Size: e.Size,
 					Mode: e.Mode,
-					OSS:              e.OSS,
+					OSS:  e.OSS,
 				}
 			}
 			continue
@@ -187,7 +187,7 @@ func (r *Repository) StashPop() error {
 
 		// Add all OS variants to index (default + OS-specific)
 		for _, e := range group.entries {
-			key := entryKey(name, osIDForKey(e.OSS))
+			key := entryKey(name, e.OSS)
 			var contentHash core.Hash
 			if e.Hash == winner.Hash {
 				contentHash = core.HashFromBytes(fileData)
@@ -202,7 +202,7 @@ func (r *Repository) StashPop() error {
 				ContentHash: contentHash,
 				Size:        e.Size,
 				Mode:        e.Mode,
-				OSS:              e.OSS,
+				OSS:         e.OSS,
 			}
 		}
 	}

@@ -6,33 +6,35 @@ import (
 	"strings"
 )
 
-// KnownOSes is the list of recognized operating system short identifiers.
-// The numeric ID = index + 1. ID 0 means "all OSes" (default).
+// OS bitmask constants — each bit of the OSS byte represents one OS.
+const (
+	OSWin   uint8 = 1 << 0 // 1 — Microsoft Windows
+	OSMac   uint8 = 1 << 1 // 2 — Apple macOS
+	OSLinux uint8 = 1 << 2 // 4 — Linux
+)
+
+// KnownOSes is the list of recognized operating system short identifiers,
+// in bit order. An OSS bitmask (1=win, 2=mac, 4=linux) has one bit per OS;
+// mask 0 means "all OSes" (default).
 var KnownOSes = []string{
-	"win",       // 1
-	"mac",       // 2
-	"linux",     // 3
-	"freebsd",   // 4
-	"netbsd",    // 5
-	"openbsd",   // 6
-	"dragonfly", // 7
-	"solaris",   // 8
-	"android",   // 9
+	"win",
+	"mac",
+	"linux",
 }
 
-// osNameToID maps OS name strings to numeric IDs.
+// osNameToID maps OS name strings to their bitmask values.
 var osNameToID map[string]uint8
 
-// osIDToName maps numeric OS IDs to name strings. ID 0 is "".
+// osIDToName maps OS bitmask values to name strings. Mask 0 is "".
 var osIDToName map[uint8]string
 
 func init() {
 	osNameToID = make(map[string]uint8, len(KnownOSes))
 	osIDToName = make(map[uint8]string, len(KnownOSes))
 	for i, name := range KnownOSes {
-		id := uint8(i + 1)
-		osNameToID[name] = id
-		osIDToName[id] = name
+		bit := uint8(1) << uint(i)
+		osNameToID[name] = bit
+		osIDToName[bit] = name
 	}
 }
 
@@ -42,7 +44,7 @@ func IsKnownOS(s string) bool {
 	return ok
 }
 
-// OSID returns the numeric ID for an OS name string.
+// OSID returns the bitmask value for an OS name string.
 // Returns 0 if the name is unknown (0 = all OSes).
 func OSID(name string) uint8 {
 	if id, ok := osNameToID[name]; ok {
@@ -51,8 +53,8 @@ func OSID(name string) uint8 {
 	return 0
 }
 
-// OSName returns the name string for a numeric OS ID.
-// Returns "" for ID 0 (all OSes), "?" for unknown IDs.
+// OSName returns the name string for an OS bitmask value.
+// Returns "" for mask 0 (all OSes), "?" for unknown masks.
 func OSName(id uint8) string {
 	if id == 0 {
 		return ""
@@ -63,22 +65,27 @@ func OSName(id uint8) string {
 	return "?"
 }
 
-// goosToOSID maps runtime.GOOS values to OS numeric IDs.
+// OSNames returns the names of the OSes set in the mask, in KnownOSes order.
+func OSNames(mask uint8) []string {
+	var names []string
+	for i, name := range KnownOSes {
+		if mask&(1<<uint(i)) != 0 {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// goosToOSID maps runtime.GOOS values to OS bitmask values.
 var goosToOSID = map[string]uint8{
-	"windows":   1, // win
-	"darwin":    2, // mac
-	"linux":     3,
-	"freebsd":   4,
-	"netbsd":    5,
-	"openbsd":   6,
-	"dragonfly": 7,
-	"solaris":   8,
-	"android":   9,
+	"windows": OSWin,
+	"darwin":  OSMac,
+	"linux":   OSLinux,
 }
 
 // entryKey builds the composite map key for an OS-tagged entry.
-// When osID is 0, key == path (backward compatible).
-// When osID is non-zero, key == path + "\x00" + byte(osID).
+// The key discriminator is the entry's OSS bitmask: when the mask is 0,
+// key == path; otherwise key == path + "\x00" + mask byte.
 func entryKey(path string, osID uint8) string {
 	if osID == 0 {
 		return path
@@ -91,8 +98,8 @@ func EntryKey(path string, osID uint8) string {
 	return entryKey(path, osID)
 }
 
-// parseKey splits a composite key into the base path and OS ID.
-// If no separator is found, OS ID is 0 (default entry).
+// parseKey splits a composite key into the base path and OS mask.
+// If no separator is found, the OS mask is 0 (default entry).
 func parseKey(key string) (path string, osID uint8) {
 	for i := 0; i < len(key); i++ {
 		if key[i] == '\x00' {
@@ -110,50 +117,25 @@ func ParseKey(key string) (path string, osID uint8) {
 	return parseKey(key)
 }
 
-// osMatch returns true if queryOS is in oss (empty oss matches all).
-func osMatch(oss []uint8, queryOS uint8) bool {
-	if len(oss) == 0 {
-		return true
-	}
-	for _, id := range oss {
-		if id == queryOS {
-			return true
-		}
-	}
-	return false
+// osMatch returns true if oss includes queryOS (mask 0 matches all OSes).
+func osMatch(oss, queryOS uint8) bool {
+	return oss == 0 || oss&queryOS != 0
 }
 
-// isOSSpecific returns true if oss has at least one OS ID (not a default entry).
-func isOSSpecific(oss []uint8) bool {
-	return len(oss) > 0
+// osExactMatch returns true if oss applies ONLY to queryOS.
+func osExactMatch(oss, queryOS uint8) bool {
+	return oss != 0 && oss == queryOS
 }
 
-// osIDForKey returns the OS ID to use as the key discriminator.
-// If oss has a single OS, that OS ID is used; otherwise returns 0.
-func osIDForKey(oss []uint8) uint8 {
-	if len(oss) == 1 {
-		return oss[0]
-	}
-	return 0
+// isOSSpecific returns true if oss is a non-zero mask (not a default entry).
+func isOSSpecific(oss uint8) bool {
+	return oss != 0
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // visibleEntries filters the full index map to only entries that should be
 // visible on the given OS. Returns a map keyed by clean path (no OS suffix).
 // For each base path: if an OS-specific match exists it wins; otherwise default.
-// Uses each entry's OSS field for OS match.
+// Uses each entry's OSS mask for OS match.
 func visibleEntries(entries map[string]IndexEntry, currentOS uint8) map[string]IndexEntry {
 	result := make(map[string]IndexEntry)
 
@@ -194,7 +176,8 @@ func collectPaths(entries map[string]IndexEntry) []string {
 	return paths
 }
 
-// CurrentOSID returns the numeric OS ID for the current runtime OS.
+// CurrentOSID returns the OS bitmask for the current runtime OS.
+// Returns 0 (all OSes) for unrecognized platforms.
 func CurrentOSID() uint8 {
 	if id, ok := goosToOSID[runtime.GOOS]; ok {
 		return id
@@ -202,7 +185,7 @@ func CurrentOSID() uint8 {
 	return 0
 }
 
-// currentOS returns the numeric OS ID for the current runtime OS.
+// currentOS returns the OS bitmask for the current runtime OS.
 func currentOS() uint8 {
 	return CurrentOSID()
 }
@@ -258,7 +241,27 @@ func ParseOSExpr(s string) (include, exclude map[uint8]bool, err error) {
 	return include, exclude, nil
 }
 
-
+// MaskFromOSExpr converts include/exclude sets into an OS bitmask.
+// A pure include list yields the union of the included bits; an exclude
+// list yields all known bits except the excluded ones. Returns 0 (all
+// OSes) for an empty expression.
+func MaskFromOSExpr(include, exclude map[uint8]bool) uint8 {
+	var mask uint8
+	switch {
+	case len(include) > 0 && len(exclude) == 0:
+		for id := range include {
+			mask |= id
+		}
+	case len(exclude) > 0:
+		for _, name := range KnownOSes {
+			id := OSID(name)
+			if !exclude[id] {
+				mask |= id
+			}
+		}
+	}
+	return mask
+}
 
 // VisibleEntriesExpr filters the full index map using an include/exclude expression.
 // For each base path: if an OS-specific match exists it wins; otherwise default.
@@ -284,9 +287,10 @@ func VisibleEntriesExpr(entries map[string]IndexEntry, include, exclude map[uint
 	return result
 }
 
-// MatchOSExpr checks whether a given entry OS ID matches the include/exclude filter.
-// entryOS is the key discriminator OS ID (0 = default entry, matches all filters).
-// When both include and exclude are nil, all entries match.
+// MatchOSExpr checks whether an entry OS mask matches the include/exclude filter.
+// entryOS is the entry's OS bitmask (0 = default entry, matches all filters).
+// A mask matches when it overlaps at least one included bit and contains no
+// excluded bit. When both include and exclude are nil, all entries match.
 func MatchOSExpr(entryOS uint8, include, exclude map[uint8]bool) bool {
 	if include == nil && exclude == nil {
 		return true
@@ -294,16 +298,23 @@ func MatchOSExpr(entryOS uint8, include, exclude map[uint8]bool) bool {
 	if entryOS == 0 {
 		return true
 	}
-	if exclude[entryOS] {
-		return false
+	for id := range exclude {
+		if entryOS&id != 0 {
+			return false
+		}
 	}
-	if len(include) > 0 && !include[entryOS] {
+	if len(include) > 0 {
+		for id := range include {
+			if entryOS&id != 0 {
+				return true
+			}
+		}
 		return false
 	}
 	return true
 }
 
-// OSNameOrStar returns the display name for an OS ID.
+// OSNameOrStar returns the display name for an OS mask.
 // 0 is displayed as "*" (all OSes).
 func OSNameOrStar(id uint8) string {
 	if id == 0 {

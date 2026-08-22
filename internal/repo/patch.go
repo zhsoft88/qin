@@ -213,7 +213,7 @@ func (r *Repository) ApplyPatch(data []byte) error {
 			// Also try the visible entry
 			if entry, ok := visible[cleanPath]; ok {
 				for k := range idx.Entries {
-					if p, o := parseKey(k); p == cleanPath && o == osIDForKey(entry.OSS) {
+					if p, o := parseKey(k); p == cleanPath && o == entry.OSS {
 						delete(idx.Entries, k)
 						break
 					}
