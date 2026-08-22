@@ -174,6 +174,13 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 			continue
 		}
 
+		// Record the written file's mtime so the next status can use the
+		// stat fast path instead of re-hashing every restored file.
+		var writtenMtime int64
+		if fi, err := os.Lstat(fullPath); err == nil {
+			writtenMtime = fi.ModTime().UnixNano()
+		}
+
 		// Add all OS variants to index (default + OS-specific)
 		for _, e := range group.entries {
 			key := entryKey(name, e.OSS)
@@ -186,12 +193,17 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 					contentHash = core.HashFromBytes(bd)
 				}
 			}
+			var mt int64
+			if e.Hash == winner.Hash {
+				mt = writtenMtime
+			}
 			newIndex.Entries[key] = IndexEntry{
 				Hash:        e.Hash,
 				ContentHash: contentHash,
 				Size:        e.Size,
 				Mode:        e.Mode,
 				Lazy:        e.Hash == winner.Hash && isLazy,
+				Mtime:       mt,
 				OSS:         e.OSS,
 			}
 		}

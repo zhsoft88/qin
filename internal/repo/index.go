@@ -32,8 +32,9 @@ type IndexEntry struct {
 	ContentHash core.Hash `json:"content_hash"` // raw file content hash (for change detection)
 	Size        int64     `json:"size"`
 	Mode        uint32    `json:"mode"`
-	Lazy        bool      `json:"lazy,omitempty"` // true if chunks not yet fetched (lfs placeholder)
-	OSS         uint8     `json:"oss,omitempty"`  // OS bitmask: 1=win, 2=mac, 4=linux; 0 = all OSes
+	Lazy        bool      `json:"lazy,omitempty"`  // true if chunks not yet fetched (lfs placeholder)
+	Mtime       int64     `json:"mtime,omitempty"` // file mtime (UnixNano) at add time; 0 = unknown → status always re-hashes
+	OSS         uint8     `json:"oss,omitempty"`   // OS bitmask: 1=win, 2=mac, 4=linux; 0 = all OSes
 }
 
 // Index is the staging area, mapping repo-relative paths to entries.
@@ -152,8 +153,9 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) erro
 		}
 		key := entryKey(filepath.ToSlash(relPath), oss)
 		idx.Entries[key] = IndexEntry{
-			Mode: DirMode,
-			OSS:  oss,
+			Mode:  DirMode,
+			Mtime: fi.ModTime().UnixNano(),
+			OSS:   oss,
 		}
 		return nil
 	}
@@ -206,6 +208,7 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) erro
 		ContentHash: contentHash,
 		Size:        fi.Size(),
 		Mode:        mode,
+		Mtime:       fi.ModTime().UnixNano(),
 		OSS:         oss,
 	}
 	return nil

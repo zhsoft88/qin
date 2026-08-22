@@ -187,11 +187,16 @@ func (r *Repository) ApplyPatch(data []byte) error {
 			if err != nil {
 				return fmt.Errorf("store object for %s: %w", cleanPath, err)
 			}
+			var mt int64
+			if fi, err := os.Lstat(fullPath); err == nil {
+				mt = fi.ModTime().UnixNano()
+			}
 			idx.Entries[key] = IndexEntry{
 				Hash:        h,
 				ContentHash: contentHash,
 				Size:        size,
 				Mode:        0644,
+				Mtime:       mt,
 			}
 
 		case '-':

@@ -209,6 +209,11 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 		return err
 	}
 
+	var mt int64
+	if fi, err := os.Lstat(fullPath); err == nil {
+		mt = fi.ModTime().UnixNano()
+	}
+
 	// Update index — mark as no longer lazy
 	idx.Entries[filePath] = IndexEntry{
 		Hash:        entry.Hash,
@@ -216,6 +221,7 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 		Size:        entry.Size,
 		Mode:        entry.Mode,
 		Lazy:        false,
+		Mtime:       mt,
 		OSS:         entry.OSS,
 	}
 	return r.SaveIndex(idx)
@@ -319,7 +325,7 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 		if len(set)%5000 < 10 {
 			fmt.Fprintf(os.Stderr, "\rscanning: %d objects...", len(set))
 		}
-		
+
 	}
 
 	return nil

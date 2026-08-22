@@ -339,11 +339,16 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 			continue
 		}
 
+		var mt int64
+		if fi, err := os.Lstat(fullPath); err == nil {
+			mt = fi.ModTime().UnixNano()
+		}
 		newIndex.Entries[name] = IndexEntry{
 			Hash:        entry.Hash,
 			ContentHash: core.HashFromBytes(fileData),
 			Size:        entry.Size,
 			Mode:        entry.Mode,
+			Mtime:       mt,
 			OSS:         entry.OSS,
 		}
 	}

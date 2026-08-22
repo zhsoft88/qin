@@ -198,6 +198,10 @@ func (r *Repository) applyCommitChanges(parentTree, commitTree map[string]TreeEn
 				return fmt.Errorf("write %s: %w", cleanPath, err)
 			}
 
+			var mt int64
+			if fi, err := os.Lstat(fullPath); err == nil {
+				mt = fi.ModTime().UnixNano()
+			}
 			var contentHash core.Hash
 			if objType != core.ObjectChunkManifest {
 				contentHash = core.HashFromBytes(fileData)
@@ -207,6 +211,7 @@ func (r *Repository) applyCommitChanges(parentTree, commitTree map[string]TreeEn
 				ContentHash: contentHash,
 				Size:        newEntry.Size,
 				Mode:        newEntry.Mode,
+				Mtime:       mt,
 				OSS:         newEntry.OSS,
 			}
 

@@ -41,6 +41,14 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		return nil, err
 	}
 
+	// Racily-clean bound: an entry whose mtime is >= the index's own mtime
+	// may have been modified in the same timestamp tick as the index write,
+	// so it must be re-hashed instead of trusting the stat fast path.
+	var idxMtime int64
+	if fi, err := os.Stat(r.indexPath()); err == nil {
+		idxMtime = fi.ModTime().UnixNano()
+	}
+
 	s := &Status{
 		Branch: r.CurrentBranch(),
 	}
@@ -97,12 +105,10 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	// Track all base paths (including non-visible OS variants) for directory tracking
 	phase = "building maps"
 	fmt.Fprintf(os.Stderr, "\r%s...", phase)
-	tracked := make(map[string]bool)
 	trackedDirs := make(map[string]bool)
 	allEntries := make(map[string]IndexEntry)
 	for key, entry := range idx.Entries {
 		path, _ := parseKey(key)
-		tracked[path] = true
 		allEntries[path] = entry
 		for dir := filepath.Dir(path); dir != "."; dir = filepath.Dir(dir) {
 			trackedDirs[filepath.ToSlash(dir)] = true
@@ -154,26 +160,44 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 			if entry, ok := allEntries[name]; ok && IsSubmoduleMode(entry.Mode) {
 				return filepath.SkipDir
 			}
-			if !tracked[name] && !trackedDirs[name] && !isParentTracked(tracked, name) {
-				if !ignorer.Match(name, true) {
-					s.Untracked = append(s.Untracked, name+"/")
+			if !trackedDirs[name] {
+				// No tracked content below — the whole subtree is either
+				// untracked or ignored. Report it once and prune, except
+				// when the dir is ignored but negate rules exist: children
+				// may be re-included, so we must descend to find them.
+				ignored := ignorer.Match(name, true)
+				if ignored && !ignorer.hasNegate {
+					return filepath.SkipDir
 				}
-				return filepath.SkipDir
+				if !ignored {
+					s.Untracked = append(s.Untracked, name+"/")
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
 
-		if _, ok := allEntries[name]; ok {
+		if entry, ok := allEntries[name]; ok {
+			// Stat fast path: skip the content read+hash when size and mtime
+			// match the index entry and the entry predates the index write.
+			// Symlinks are excluded (their on-disk content can change without
+			// touching the link's own stat). A mismatch only means extra work,
+			// never a missed change.
+			if !IsSymlinkMode(entry.Mode) && entry.Mtime != 0 &&
+				fi.Size() == entry.Size &&
+				fi.ModTime().UnixNano() == entry.Mtime &&
+				entry.Mtime < idxMtime {
+				return nil
+			}
 			data, err := ioutil.ReadFile(path)
 			if err != nil {
 				return nil
 			}
-			entry := allEntries[name]
 			contentHash := core.HashFromBytes(data)
 			if contentHash != entry.ContentHash {
 				s.Modified = append(s.Modified, name)
 			}
-		} else if !tracked[name] && !ignorer.Match(name, false) {
+		} else if !ignorer.Match(name, false) {
 			s.Untracked = append(s.Untracked, name)
 		}
 
@@ -197,20 +221,6 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	return s, nil
 }
 
-func isParentTracked(tracked map[string]bool, path string) bool {
-	for {
-		path = filepath.Dir(path)
-		if path == "." || path == "/" {
-			return false
-		}
-		if tracked[path] || tracked[filepath.ToSlash(path)] {
-			return true
-		}
-	}
-}
-
-
-
 // clearLine clears the current terminal line by printing spaces.
 func clearLine(w io.Writer) {
 	fmt.Fprintf(w, "\r%s\r", spaces80)
@@ -232,7 +242,6 @@ func truncateName(name string, termWidth int) string {
 	half := (max - 3) / 2
 	return name[:half] + "..." + name[len(name)-half:]
 }
-
 
 // matchFilterPath returns true if name matches any filter pattern (exact or prefix).
 func matchFilterPath(name string, filters []string) bool {

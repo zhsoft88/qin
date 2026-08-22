@@ -10,6 +10,10 @@ import (
 // IgnoreMatcher checks whether a repo-relative path should be ignored.
 type IgnoreMatcher struct {
 	patterns []ignorePattern
+	// hasNegate is true when any "!" re-include rule exists. It forces the
+	// status walk to descend into ignored directories so re-included
+	// children are still found.
+	hasNegate bool
 }
 
 type ignorePattern struct {
@@ -17,6 +21,9 @@ type ignorePattern struct {
 	negate   bool
 	dirOnly  bool
 	anchored bool
+	// litPrefix is the literal prefix of the pattern before the first glob
+	// metacharacter. Used to skip glob matching for paths that cannot match.
+	litPrefix string
 }
 
 // LoadIgnoreMatcher reads .qinignore from the repo root.
@@ -44,6 +51,7 @@ func (r *Repository) LoadIgnoreMatcher() (*IgnoreMatcher, error) {
 
 		if strings.HasPrefix(line, "!") {
 			p.negate = true
+			m.hasNegate = true
 			line = line[1:]
 		}
 
@@ -59,6 +67,7 @@ func (r *Repository) LoadIgnoreMatcher() (*IgnoreMatcher, error) {
 
 		// Convert glob to simple pattern matching
 		p.pattern = line
+		p.litPrefix = literalPrefix(line)
 		m.patterns = append(m.patterns, p)
 	}
 
@@ -69,7 +78,22 @@ func (r *Repository) LoadIgnoreMatcher() (*IgnoreMatcher, error) {
 // dir should be true if the path is a directory.
 func (m *IgnoreMatcher) Match(path string, dir bool) bool {
 	ignored := false
+	base := ""
 	for _, p := range m.patterns {
+		// Literal-prefix pre-check: if the pattern starts with literal text
+		// that cannot appear at the start of the path (or basename for
+		// unanchored patterns), the glob can never match — skip it.
+		if p.litPrefix != "" && !strings.HasPrefix(path, p.litPrefix) {
+			if p.anchored {
+				continue
+			}
+			if base == "" {
+				base = filepath.Base(path)
+			}
+			if !strings.HasPrefix(base, p.litPrefix) {
+				continue
+			}
+		}
 		if p.dirOnly {
 			if dir && path == p.pattern {
 				ignored = !p.negate
@@ -85,6 +109,19 @@ func (m *IgnoreMatcher) Match(path string, dir bool) bool {
 		}
 	}
 	return ignored
+}
+
+// literalPrefix returns the literal prefix of a glob pattern, stopping at the
+// first glob metacharacter (* ? [ \). Empty when the pattern starts with a
+// metacharacter or is itself empty.
+func literalPrefix(p string) string {
+	for i := 0; i < len(p); i++ {
+		switch p[i] {
+		case '*', '?', '[', '\\':
+			return p[:i]
+		}
+	}
+	return p
 }
 
 // matchGlob checks if path matches a glob pattern.
@@ -202,4 +239,3 @@ func globMatch(s, p string) bool {
 func MatchGlob(path, pattern string) bool {
 	return matchGlob(path, pattern, false)
 }
-
