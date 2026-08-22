@@ -28,7 +28,7 @@ qin is a Git-inspired, content-addressed version control system in Go 1.15+ (std
 - **`internal/repo/`** — All VCS logic, structured as methods on `*Repository`:
   - **`repo.go`** — `Repository` struct (holds Path + Config), `Init()` (creates `.qin/` layout), `Open()` (walks up directories to find `.qin/`), HEAD management
   - **`store.go`** — Object read/write at `.qin/objects/XX/YYYYYY` (Git-style 2-char subdir). `StoreObject` uses atomic temp+rename. `FindObjectByPrefix` resolves short hashes
-  - **`index.go`** — Staging area at `.qin/index` (JSON). `IndexEntry` has Hash, ContentHash, Size, Mode, Lazy, OSS (uint8 bitmask: 1=win, 2=mac, 4=linux). Composite keys `"path\0<oss_mask>"` enable OS-specific variants
+  - **`index.go`** — Staging area at `.qin/index` (binary, "QINIDX" magic; legacy JSON migrated on load). `IndexEntry` has Hash, ContentHash, Size, Mode, Lazy, Mtime, OSS (uint8 bitmask: 1=win, 2=mac, 4=linux). Composite keys `"path\0<oss_mask>"` enable OS-specific variants
   - **`tree.go`** — `Tree` (ordered `TreeEntry` list) / `Commit` (tree hash + parents + author + message + time). `WriteTree` builds from index, `WriteCommit` creates commit + updates branch ref
   - **All other files** handle one operation each: status, diff, merge (BFS merge-base + 3-way), rebase, stash, checkout/switch/branch, reset/restore, patch, remote push/fetch/pull/clone, serve (HTTP server), GC, submodules, config, ignore
 
@@ -69,7 +69,7 @@ Files added via `add` go through `StoreChunkedFile()`:
 .qin/
   HEAD                — "ref: refs/heads/main" or a commit hash
   config              — JSON config (chunk sizes, diff limits, user)
-  index               — JSON staging area
+  index               — binary staging area (QINIDX v1; JSON auto-migrated)
   untracked-cache.json— per-directory untracked lists for fast status (git core.untrackedCache style)
   objects/            — Git-style XX/YYYYYY hash layout
   refs/

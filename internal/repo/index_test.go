@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 func TestAddAndListFiles(t *testing.T) {
@@ -65,8 +67,8 @@ func TestAddMultipleFiles(t *testing.T) {
 	}
 
 	files := map[string]string{
-		"a.txt": "content a",
-		"b.txt": "content b",
+		"a.txt":     "content a",
+		"b.txt":     "content b",
 		"sub/c.txt": "content c",
 	}
 	for path, content := range files {
@@ -261,6 +263,148 @@ func TestAddPlaceholderRejected(t *testing.T) {
 	err = r.AddFile(filepath.Join(dir, "large.bin"))
 	if err == nil {
 		t.Fatal("expected error when adding placeholder file")
+	}
+}
+
+func TestIndexBinaryRoundTrip(t *testing.T) {
+	idx := &Index{Entries: map[string]IndexEntry{
+		"hello.txt": {
+			Hash:        core.HashFromBytes([]byte("hello")),
+			ContentHash: core.HashFromBytes([]byte("hello")),
+			Size:        5,
+			Mode:        0644,
+			Mtime:       1234567890123456789,
+		},
+		"f.txt\x00\x04": { // OS-variant composite key (linux = 4)
+			Hash:        core.HashFromBytes([]byte("linux")),
+			ContentHash: core.HashFromBytes([]byte("linux")),
+			Size:        5,
+			Mode:        0755,
+			Lazy:        true,
+			Mtime:       999,
+			OSS:         OSLinux,
+		},
+		"dir/": {
+			Mode:  DirMode,
+			Mtime: 42,
+			OSS:   OSWin | OSMac,
+		},
+	}}
+
+	data, err := encodeIndex(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data[:6]) != indexMagic {
+		t.Fatal("expected QINIDX magic")
+	}
+
+	got, err := decodeIndex(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(got.Entries))
+	}
+	if e := got.Entries["hello.txt"]; e.Size != 5 || e.Mode != 0644 || e.Mtime != 1234567890123456789 ||
+		e.Hash != idx.Entries["hello.txt"].Hash || e.ContentHash != idx.Entries["hello.txt"].ContentHash {
+		t.Errorf("hello.txt round-trip mismatch: %+v", e)
+	}
+	if e := got.Entries["f.txt\x00\x04"]; !e.Lazy || e.OSS != OSLinux || e.Mtime != 999 || e.Mode != 0755 {
+		t.Errorf("f.txt variant round-trip mismatch: %+v", e)
+	}
+	if e := got.Entries["dir/"]; e.Mode != DirMode || e.OSS != OSWin|OSMac || e.Mtime != 42 {
+		t.Errorf("dir entry round-trip mismatch: %+v", e)
+	}
+}
+
+// TestIndexJSONMigration verifies a legacy JSON index is loaded and rewritten
+// in the binary format.
+func TestIndexJSONMigration(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := &Index{Entries: map[string]IndexEntry{
+		"legacy.txt": {
+			Hash:        core.HashFromBytes([]byte("legacy")),
+			ContentHash: core.HashFromBytes([]byte("legacy")),
+			Size:        6,
+			Mode:        0644,
+			Mtime:       777,
+		},
+	}}
+	data, err := core.SerializeJSON(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(repo.indexPath(), data, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := repo.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, ok := idx.Entries["legacy.txt"]; !ok || e.Size != 6 || e.Mtime != 777 {
+		t.Fatalf("legacy entry not preserved: %+v", e)
+	}
+
+	// The file must now be binary
+	onDisk, err := ioutil.ReadFile(repo.indexPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(onDisk[:6]) != indexMagic {
+		t.Fatal("expected index migrated to binary format")
+	}
+}
+
+func TestIndexCorrupt(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Truncated binary index
+	if err := ioutil.WriteFile(repo.indexPath(), []byte("QINIDX\x01\x00\xff\xff\xff\xff"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.LoadIndex(); err == nil {
+		t.Fatal("expected error for truncated index")
+	}
+
+	// Garbage
+	if err := ioutil.WriteFile(repo.indexPath(), []byte("not an index at all"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.LoadIndex(); err == nil {
+		t.Fatal("expected error for garbage index")
+	}
+
+	// Missing file → empty index, no error
+	if err := os.Remove(repo.indexPath()); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := repo.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.Entries) != 0 {
+		t.Fatal("expected empty index")
 	}
 }
 

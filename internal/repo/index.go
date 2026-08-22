@@ -49,6 +49,7 @@ func (r *Repository) indexPath() string {
 }
 
 // LoadIndex reads the index from disk, returning an empty index if none exists.
+// A legacy JSON index is migrated to the binary format on load.
 func (r *Repository) LoadIndex() (*Index, error) {
 	data, err := ioutil.ReadFile(r.indexPath())
 	if err != nil {
@@ -58,6 +59,15 @@ func (r *Repository) LoadIndex() (*Index, error) {
 		return nil, fmt.Errorf("read index: %w", err)
 	}
 
+	if len(data) >= len(indexMagic) && string(data[:len(indexMagic)]) == indexMagic {
+		idx, err := decodeIndex(data)
+		if err != nil {
+			return nil, fmt.Errorf("parse index: %w", err)
+		}
+		return idx, nil
+	}
+
+	// Legacy JSON index — migrate to binary in place
 	var idx Index
 	if err := core.DeserializeJSON(data, &idx); err != nil {
 		return nil, fmt.Errorf("parse index: %w", err)
@@ -65,12 +75,15 @@ func (r *Repository) LoadIndex() (*Index, error) {
 	if idx.Entries == nil {
 		idx.Entries = make(map[string]IndexEntry)
 	}
+	if err := r.SaveIndex(&idx); err != nil {
+		return nil, fmt.Errorf("migrate index: %w", err)
+	}
 	return &idx, nil
 }
 
-// SaveIndex writes the index to disk.
+// SaveIndex writes the index to disk in the binary format.
 func (r *Repository) SaveIndex(idx *Index) error {
-	data, err := core.SerializeJSON(idx)
+	data, err := encodeIndex(idx)
 	if err != nil {
 		return fmt.Errorf("serialize index: %w", err)
 	}
