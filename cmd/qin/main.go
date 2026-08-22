@@ -124,7 +124,7 @@ Commands:
   version                       Show version information
   gc                            Prune dangling objects to reclaim space
 
-OS identifiers: win, mac, linux, freebsd, netbsd, openbsd, dragonfly, solaris, android`)
+OS identifiers: win, mac, linux`)
 }
 
 // ---- init ----
@@ -1473,10 +1473,14 @@ func runShow(args []string) error {
 	}
 
 	// Default to current OS
+	explicitOS := osName != ""
 	if osName == "" {
 		osName = repo.OSName(repo.CurrentOSID())
 	}
 	osID := repo.OSID(osName)
+	if explicitOS && osID == 0 {
+		return fmt.Errorf("unknown OS: %s", osName)
+	}
 
 	r, err := findRepo()
 	if err != nil {
