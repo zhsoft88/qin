@@ -75,6 +75,9 @@ func main() {
 		"lost-found":  {"lost-found", "List dangling (unreachable) commits", runLostFound},
 		"gc":          {"gc", "Prune dangling objects to reclaim space", runGC},
 		"version":     {"version", "Show version information", runVersion},
+		// Aliases
+		"st": {"st", "Alias for status", runStatus},
+		"co": {"co", "Alias for checkout", runCheckout},
 	}
 	cmd, ok := cmds[os.Args[1]]
 	if !ok {
@@ -95,10 +98,10 @@ Commands:
   rm [--cached] [-r] <file>   Remove files (--cached keeps on disk)
   commit            Create a commit from staged files
   log [--graph]     Show commit history (--graph for branch visualization)
-  status            Show working tree status
+  status            Show working tree status (alias: st)
   cat <hash>        Print an object
   ls                List staged files
-  checkout <ref>    Restore files from a commit
+  checkout <ref>    Restore files from a commit (alias: co)
   switch <branch>   Switch to an existing branch
   branch [-d <name>] List, create, or delete branches
   tag [name]        List or create tags
