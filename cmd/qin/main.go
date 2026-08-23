@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"github.com/zhsoft88/qin/internal/core"
@@ -8,9 +9,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -1547,18 +1550,45 @@ func runServe(args []string) error {
 	basePath := fs.String("base-path", "", "serve multiple repositories from this base directory")
 	fs.Parse(args)
 
+	var handler http.Handler
 	if *basePath != "" {
 		srv := &repo.RepoServer{BasePath: *basePath}
 		fmt.Printf("serving repositories from %s on %s\n", *basePath, *addr)
-		return http.ListenAndServe(*addr, srv)
+		handler = srv
+	} else {
+		r, err := findRepo()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("serving %s on %s\n", r.Path, *addr)
+		handler = http.HandlerFunc(r.ServeHTTP)
 	}
 
-	r, err := findRepo()
-	if err != nil {
+	server := &http.Server{Addr: *addr, Handler: handler}
+
+	// Graceful shutdown: on SIGINT/SIGTERM, stop accepting new connections
+	// and let in-flight requests finish, bounded by a timeout so a stuck
+	// request cannot block exit forever.
+	done := make(chan struct{})
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		fmt.Printf("\nshutting down...\n")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "shutdown: %v\n", err)
+		}
+		close(done)
+	}()
+
+	err := server.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
 		return err
 	}
-	fmt.Printf("serving %s on %s\n", r.Path, *addr)
-	return http.ListenAndServe(*addr, http.HandlerFunc(r.ServeHTTP))
+	<-done
+	return nil
 }
 
 // ---- config ----
