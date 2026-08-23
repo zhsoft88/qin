@@ -922,9 +922,30 @@ func runLs(args []string) error {
 		return nil
 	}
 
-	// Show all files regardless of OS
+	// Show all files regardless of OS, sorted by path then OS variant
+	// (default first, then win/mac/linux)
+	type lsEntry struct {
+		path  string
+		osID  uint8
+		entry repo.IndexEntry
+	}
+	entries := make([]lsEntry, 0, len(files))
 	for key, entry := range files {
 		path, osID := repo.ParseKey(key)
+		entries = append(entries, lsEntry{path, osID, entry})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].path != entries[j].path {
+			return entries[i].path < entries[j].path
+		}
+		if entries[i].osID == 0 || entries[j].osID == 0 {
+			return entries[i].osID == 0
+		}
+		return entries[i].osID < entries[j].osID
+	})
+	for _, e := range entries {
+		path, osID := e.path, e.osID
+		entry := e.entry
 		osTag := "*"
 		if osID != 0 {
 			osTag = strings.Join(repo.OSNames(osID), ",")
