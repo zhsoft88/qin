@@ -95,10 +95,10 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 				if tree, err := r.LoadTree(commit.Tree); err == nil {
 					treeMap := make(map[string]TreeEntry, len(tree.Entries))
 					for _, te := range tree.Entries {
-						treeMap[te.Name] = te
+						treeMap[entryKey(te.Name, te.OSS)] = te
 					}
 					for path, entry := range visible {
-						if te, ok := treeMap[path]; ok && te.Hash == entry.Hash {
+						if te, ok := treeMap[entryKey(path, entry.OSS)]; ok && te.Hash == entry.Hash {
 							delete(visible, path)
 						}
 					}

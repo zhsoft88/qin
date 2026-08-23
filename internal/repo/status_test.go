@@ -677,3 +677,74 @@ func TestStatusOtherOSVariantUntracked(t *testing.T) {
 		t.Fatalf("expected clean on win view, got untracked=%v modified=%v deleted=%v", s.Untracked, s.Modified, s.Deleted)
 	}
 }
+
+// TestStatusStagedOSVariants verifies that committed OS variants are not
+// reported as staged: the HEAD tree comparison must match the same variant
+// (composite key), not just the path name.
+func TestStatusStagedOSVariants(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	os.MkdirAll(filepath.Join(dir, "multi"), 0755)
+	fpath := filepath.Join(dir, "multi", "my.txt")
+
+	// Two variants of the same path, both committed
+	ioutil.WriteFile(fpath, []byte("win content"), 0644)
+	idx, err := repo.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddFileToIndex(fpath, OSWin, idx); err != nil {
+		t.Fatal(err)
+	}
+	ioutil.WriteFile(fpath, []byte("mac content!"), 0644)
+	if _, err := repo.AddFileToIndex(fpath, OSMac, idx); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.WriteCommit("Test", "init"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Neither variant may show as staged — each must match its own tree entry
+	for _, osTag := range []uint8{OSWin, OSMac} {
+		s, err := repo.WorkTreeStatusFiltered(map[uint8]bool{osTag: true}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(s.Staged) != 0 {
+			t.Fatalf("expected no staged on OS %d, got %v", osTag, s.Staged)
+		}
+	}
+
+	// A third variant added after the commit → staged
+	ioutil.WriteFile(fpath, []byte("linux content"), 0644)
+	idx, err = repo.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddFileToIndex(fpath, OSLinux, idx); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := repo.WorkTreeStatusFiltered(map[uint8]bool{OSLinux: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Staged) != 1 {
+		t.Fatalf("expected 1 staged, got %v", s.Staged)
+	}
+}
