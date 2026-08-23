@@ -12,7 +12,8 @@ import (
 	"github.com/zhsoft88/qin/internal/core"
 )
 
-// spaces80 is used by clearLine to overwrite progress text on the current line.
+// spaces80 is used by clearLine and printProgress to overwrite progress
+// text on the current line.
 const spaces80 = "                                                                                "
 
 // Status holds the complete working tree status.
@@ -42,7 +43,7 @@ func (r *Repository) WorkTreeStatus() (*Status, error) {
 //     directories via the on-disk untracked cache.
 func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, filterPaths ...string) (*Status, error) {
 	phase := "loading index"
-	fmt.Fprintf(os.Stderr, "\r%s...", phase)
+	printProgress("%s...", phase)
 	idx, err := r.LoadIndex()
 	if err != nil {
 		return nil, err
@@ -80,7 +81,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	}
 
 	phase = "comparing HEAD"
-	fmt.Fprintf(os.Stderr, "\r%s...", phase)
+	printProgress("%s...", phase)
 	// Snapshot for deletion check (before filtering committed entries)
 	allVisible := make(map[string]IndexEntry, len(visible))
 	for k, v := range visible {
@@ -113,7 +114,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 
 	// Track all base paths (including non-visible OS variants) for directory tracking
 	phase = "building maps"
-	fmt.Fprintf(os.Stderr, "\r%s...", phase)
+	printProgress("%s...", phase)
 	tracked := make(map[string]bool)
 	trackedDirs := make(map[string]bool)
 	allEntries := make(map[string]IndexEntry)
@@ -139,7 +140,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	// Uses allVisible (before the committed-filter) so committed-but-changed
 	// files are still checked, like the old single-pass walk did.
 	phase = "comparing worktree"
-	fmt.Fprintf(os.Stderr, "\r%s...", phase)
+	printProgress("%s...", phase)
 	for path, entry := range allVisible {
 		if len(filterPaths) > 0 && !matchFilterPath(path, filterPaths) {
 			continue // not scanned; the deletion check below still applies
@@ -195,7 +196,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	}
 
 	phase = "scanning"
-	fmt.Fprintf(os.Stderr, "\r%s...", phase)
+	printProgress("%s...", phase)
 	checked := 0
 	walkRoot := r.Path
 	rootRel := ""
@@ -208,7 +209,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	walk = func(absDir, relDir string) {
 		checked++
 		if checked%500 == 0 || checked == 1 {
-			fmt.Fprintf(os.Stderr, "\rscanned: %d dirs", checked)
+			printProgress("scanned: %d dirs", checked)
 		}
 		fi, err := os.Stat(absDir)
 		if err != nil {
@@ -304,7 +305,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		r.saveUntrackedCache(cache)
 	}
 	if checked > 0 {
-		fmt.Fprintf(os.Stderr, "\n")
+		endProgressLine()
 	}
 	sort.Strings(s.Untracked)
 	sort.Strings(s.Modified)
@@ -316,6 +317,34 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 // clearLine clears the current terminal line by printing spaces.
 func clearLine(w io.Writer) {
 	fmt.Fprintf(w, "\r%s\r", spaces80)
+}
+
+// lastProgressLen is the length of the most recent in-place progress line
+// written to stderr. A follow-up progress line pads with spaces to at least
+// this length, erasing the previous line's tail — a bare \r leaves residue
+// when the previous line was longer than the current one.
+var lastProgressLen int
+
+// printProgress rewrites the current stderr line with progress text,
+// erasing the tail of a previously longer line.
+func printProgress(format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	pad := lastProgressLen - len(msg)
+	if pad < 0 {
+		pad = 0
+	}
+	if pad > len(spaces80) {
+		pad = len(spaces80)
+	}
+	fmt.Fprintf(os.Stderr, "\r%s%s\r", msg, spaces80[:pad])
+	lastProgressLen = len(msg)
+}
+
+// endProgressLine scrolls the current progress line and resets the
+// tail-padding state for the next progress line.
+func endProgressLine() {
+	fmt.Fprintf(os.Stderr, "\n")
+	lastProgressLen = 0
 }
 
 // truncateName shortens a file path for display, keeping start and end.

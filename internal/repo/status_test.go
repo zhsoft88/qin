@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -539,5 +540,64 @@ func TestStatusSkipsLoDir(t *testing.T) {
 
 	if len(s.Untracked) != 0 {
 		t.Fatalf("expected 0 untracked (lo dir skipped), got %v", s.Untracked)
+	}
+}
+
+// renderProgressLine simulates a terminal's carriage-return overwrite
+// behavior for a single progress line.
+func renderProgressLine(s string) string {
+	var out []byte
+	for _, seg := range strings.Split(s, "\r") {
+		if len(seg) > len(out) {
+			out = append(out, make([]byte, len(seg)-len(out))...)
+		}
+		copy(out, seg)
+	}
+	return string(out)
+}
+
+func TestPrintProgressErasesTail(t *testing.T) {
+	old := os.Stderr
+	f, err := ioutil.TempFile("", "lo-progress-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	os.Stderr = f
+	defer func() { os.Stderr = old }()
+
+	lastProgressLen = 0 // reset shared state
+
+	// A shorter follow-up must erase the previous line's tail
+	printProgress("scanned: 500 dirs")
+	printProgress("scanned: 1 dirs")
+	endProgressLine()
+
+	// A longer follow-up must be written in full
+	printProgress("scanned: 1 dirs")
+	printProgress("scanned: 500 dirs")
+	endProgressLine()
+
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ioutil.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	visible := renderProgressLine(lines[0])
+	if strings.Contains(visible, "500") {
+		t.Fatalf("residue of previous longer line remains: %q", visible)
+	}
+	if !strings.HasPrefix(visible, "scanned: 1 dirs") {
+		t.Fatalf("current message missing: %q", visible)
+	}
+
+	visible = renderProgressLine(lines[1])
+	if !strings.HasPrefix(visible, "scanned: 500 dirs") {
+		t.Fatalf("longer message corrupted: %q", visible)
 	}
 }

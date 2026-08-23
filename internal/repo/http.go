@@ -201,7 +201,7 @@ func (r *Repository) httpCollectTree(baseURL string, treeHash core.Hash, lazy bo
 				set[entry.Hash] = true
 			}
 			if len(set)%5000 < 10 {
-				fmt.Fprintf(os.Stderr, "\rscanning: %d objects...", len(set))
+				printProgress("scanning: %d objects...", len(set))
 			}
 		}
 		return nil
@@ -247,7 +247,7 @@ func (r *Repository) fetchHTTP(baseURL, remoteName string, lazy bool) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d", i, total)
+			printProgress("fetching objects: %d/%d", i, total)
 		}
 		data, err := httpReadObject(baseURL, h)
 		if err != nil {
@@ -272,7 +272,8 @@ func (r *Repository) fetchHTTP(baseURL, remoteName string, lazy bool) error {
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d done\n", i, total)
+		printProgress("fetching objects: %d/%d done", i, total)
+		endProgressLine()
 	}
 
 	// Write remote-tracking refs
@@ -324,7 +325,7 @@ func (r *Repository) pushHTTP(baseURL, remoteName string) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d", i, total)
+			printProgress("pushing objects: %d/%d", i, total)
 		}
 		data, err := ioutil.ReadFile(r.objectPath(h))
 		if err != nil {
@@ -335,7 +336,8 @@ func (r *Repository) pushHTTP(baseURL, remoteName string) error {
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d done\n", i, total)
+		printProgress("pushing objects: %d/%d done", i, total)
+		endProgressLine()
 	}
 
 	// Update remote refs

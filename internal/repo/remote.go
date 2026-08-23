@@ -184,7 +184,7 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 	for i, chunk := range manifest.Chunks {
 		if !r.HasObject(chunk.Hash) {
 			if total > 1 {
-				fmt.Fprintf(os.Stderr, "\r pulling chunks: %d/%d", i+1, total)
+				printProgress(" pulling chunks: %d/%d", i+1, total)
 			}
 			if err := r.copyObjectFromRemote(remoteURL, chunk.Hash); err != nil {
 				return fmt.Errorf("copy chunk %s: %w", chunk.Hash.Short(), err)
@@ -193,7 +193,8 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 		}
 	}
 	if total > 1 && downloaded > 0 {
-		fmt.Fprintf(os.Stderr, "\rpulled %d chunk(s)\n", downloaded)
+		printProgress("pulled %d chunk(s)", downloaded)
+		endProgressLine()
 	}
 
 	// Reconstruct and write real file content
@@ -323,7 +324,7 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 			set[entry.Hash] = true
 		}
 		if len(set)%5000 < 10 {
-			fmt.Fprintf(os.Stderr, "\rscanning: %d objects...", len(set))
+			printProgress("scanning: %d objects...", len(set))
 		}
 
 	}
@@ -484,14 +485,15 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d", i, total)
+			printProgress("fetching objects: %d/%d", i, total)
 		}
 		if err := copyObject(remoteRepo, r, h); err != nil {
 			return fmt.Errorf("copy object %s: %w", h.Short(), err)
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\rfetching objects: %d/%d done\n", i, total)
+		printProgress("fetching objects: %d/%d done", i, total)
+		endProgressLine()
 	}
 
 	for branchName, hash := range branchRefs {
@@ -563,20 +565,22 @@ func (r *Repository) Push(remoteName string) error {
 		return nil
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\rfound %d objects to push\n", total)
+		printProgress("found %d objects to push", total)
+		endProgressLine()
 	}
 	i := 0
 	for h := range allObjects {
 		i++
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d", i, total)
+			printProgress("pushing objects: %d/%d", i, total)
 		}
 		if err := copyObject(r, remoteRepo, h); err != nil {
 			return fmt.Errorf("copy object %s: %w", h.Short(), err)
 		}
 	}
 	if total > 1 {
-		fmt.Fprintf(os.Stderr, "\rpushing objects: %d/%d done\n", i, total)
+		printProgress("pushing objects: %d/%d done", i, total)
+		endProgressLine()
 	}
 	fmt.Fprintf(os.Stderr, "pushed to %s\n", remoteName)
 
@@ -679,14 +683,15 @@ func (r *Repository) Pull(remoteName string) (*MergeResult, error) {
 		for h := range needed {
 			i++
 			if total > 1 {
-				fmt.Fprintf(os.Stderr, "\r  chunks: %d/%d", i, total)
+				printProgress("  chunks: %d/%d", i, total)
 			}
 			if err := r.copyObjectFromRemote(remoteURL, h); err != nil {
 				fmt.Fprintf(os.Stderr, "\nwarning: failed to fetch chunk %s: %s\n", h.Short(), err)
 			}
 		}
 		if total > 1 {
-			fmt.Fprintf(os.Stderr, "\r  chunks: %d/%d done\n", i, total)
+			printProgress("  chunks: %d/%d done", i, total)
+			endProgressLine()
 		}
 	}
 

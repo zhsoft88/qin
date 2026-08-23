@@ -70,7 +70,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 	for name, group := range groups {
 		processed++
 		if processed%5000 == 0 || processed == 1 {
-			fmt.Fprintf(os.Stderr, "\r  restoring: %d/%d files...", processed, total)
+			printProgress("  restoring: %d/%d files...", processed, total)
 		}
 		// Determine the winning entry for the current OS
 		var winner *TreeEntry
