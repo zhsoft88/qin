@@ -601,3 +601,79 @@ func TestPrintProgressErasesTail(t *testing.T) {
 		t.Fatalf("longer message corrupted: %q", visible)
 	}
 }
+
+// TestStatusOtherOSVariantUntracked verifies that a path tracked only by
+// another OS's variant (e.g. a win-only file on linux) is reported as
+// untracked when created locally, instead of being swallowed as "tracked"
+// and reported clean.
+func TestStatusOtherOSVariantUntracked(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Win-tagged variant, like Windows "add --os multi/my.txt" + push
+	subdir := filepath.Join(dir, "multi")
+	os.MkdirAll(subdir, 0755)
+	fpath := filepath.Join(subdir, "my.txt")
+	ioutil.WriteFile(fpath, []byte("win content"), 0644)
+	idx, err := repo.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddFileToIndex(fpath, OSWin, idx); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.SaveIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+
+	// A linux clone checks out nothing for win-only paths — remove it
+	os.RemoveAll(subdir)
+
+	linuxView := map[uint8]bool{OSLinux: true}
+	// The untracked cache is not OS-filter-aware; drop it between views so
+	// each filtered status scans fresh.
+	cachePath := filepath.Join(dir, LoDir, "untracked-cache.json")
+
+	// Fresh clone on linux: nothing on disk → clean
+	os.Remove(cachePath)
+	s, err := repo.WorkTreeStatusFiltered(linuxView, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Untracked) != 0 || len(s.Modified) != 0 || len(s.Deleted) != 0 {
+		t.Fatalf("expected clean, got untracked=%v modified=%v deleted=%v", s.Untracked, s.Modified, s.Deleted)
+	}
+
+	// User creates the file locally → must surface as untracked
+	os.MkdirAll(subdir, 0755)
+	ioutil.WriteFile(fpath, []byte("win content"), 0644)
+	os.Remove(cachePath)
+	s, err = repo.WorkTreeStatusFiltered(linuxView, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Untracked) != 1 || s.Untracked[0] != "multi/" {
+		t.Fatalf("expected untracked [multi/], got %v", s.Untracked)
+	}
+	if len(s.Modified) != 0 || len(s.Deleted) != 0 {
+		t.Fatalf("expected no modified/deleted, got modified=%v deleted=%v", s.Modified, s.Deleted)
+	}
+
+	// The win view still sees it as tracked and clean
+	os.Remove(cachePath)
+	s, err = repo.WorkTreeStatusFiltered(map[uint8]bool{OSWin: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Untracked) != 0 || len(s.Modified) != 0 || len(s.Deleted) != 0 {
+		t.Fatalf("expected clean on win view, got untracked=%v modified=%v deleted=%v", s.Untracked, s.Modified, s.Deleted)
+	}
+}

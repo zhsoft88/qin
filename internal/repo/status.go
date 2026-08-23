@@ -112,13 +112,24 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		s.CommitHash = headHash
 	}
 
-	// Track all base paths (including non-visible OS variants) for directory tracking
+	// A path counts as tracked only when a variant visible on this OS (or
+	// under the given filter) exists. A path tracked solely by other-OS
+	// variants (e.g. a win-only file on linux) must surface as untracked
+	// when created locally — otherwise status reports clean for a file
+	// that has no tracked form on this OS.
 	phase = "building maps"
 	printProgress("%s...", phase)
 	tracked := make(map[string]bool)
 	trackedDirs := make(map[string]bool)
 	allEntries := make(map[string]IndexEntry)
 	for key, entry := range idx.Entries {
+		if include == nil && exclude == nil {
+			if !osMatch(entry.OSS, currentOS()) {
+				continue
+			}
+		} else if !MatchOSExpr(entry.OSS, include, exclude) {
+			continue
+		}
 		path, _ := parseKey(key)
 		tracked[path] = true
 		allEntries[path] = entry
