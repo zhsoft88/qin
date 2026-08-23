@@ -112,27 +112,30 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		s.CommitHash = headHash
 	}
 
-	// A path counts as tracked only when a variant visible on this OS (or
-	// under the given filter) exists. A path tracked solely by other-OS
-	// variants (e.g. a win-only file on linux) must surface as untracked
-	// when created locally — otherwise status reports clean for a file
-	// that has no tracked form on this OS.
+	// tracked: only paths with a variant visible on this OS (or under the
+	// given filter) count as tracked — a path tracked solely by other-OS
+	// variants (e.g. a win-only file on linux) surfaces as untracked when
+	// created locally.
+	// allEntries follows the same visible view for submodule/empty-dir
+	// entries. trackedDirs covers every variant, so a directory holding
+	// any tracked content is descended into and the untracked file is
+	// reported individually instead of pruning the whole directory.
 	phase = "building maps"
 	printProgress("%s...", phase)
 	tracked := make(map[string]bool)
 	trackedDirs := make(map[string]bool)
 	allEntries := make(map[string]IndexEntry)
 	for key, entry := range idx.Entries {
-		if include == nil && exclude == nil {
-			if !osMatch(entry.OSS, currentOS()) {
-				continue
-			}
-		} else if !MatchOSExpr(entry.OSS, include, exclude) {
-			continue
-		}
 		path, _ := parseKey(key)
-		tracked[path] = true
-		allEntries[path] = entry
+		if include == nil && exclude == nil {
+			if osMatch(entry.OSS, currentOS()) {
+				tracked[path] = true
+				allEntries[path] = entry
+			}
+		} else if MatchOSExpr(entry.OSS, include, exclude) {
+			tracked[path] = true
+			allEntries[path] = entry
+		}
 		for dir := filepath.Dir(path); dir != "."; dir = filepath.Dir(dir) {
 			trackedDirs[filepath.ToSlash(dir)] = true
 		}

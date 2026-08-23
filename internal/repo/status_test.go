@@ -660,8 +660,8 @@ func TestStatusOtherOSVariantUntracked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Untracked) != 1 || s.Untracked[0] != "multi/" {
-		t.Fatalf("expected untracked [multi/], got %v", s.Untracked)
+	if len(s.Untracked) != 1 || s.Untracked[0] != "multi/my.txt" {
+		t.Fatalf("expected untracked [multi/my.txt], got %v", s.Untracked)
 	}
 	if len(s.Modified) != 0 || len(s.Deleted) != 0 {
 		t.Fatalf("expected no modified/deleted, got modified=%v deleted=%v", s.Modified, s.Deleted)
