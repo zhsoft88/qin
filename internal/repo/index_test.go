@@ -430,3 +430,83 @@ func TestAddNonPlaceholderWithSameContent(t *testing.T) {
 		t.Fatalf("should be able to add non-placeholder with same content: %v", err)
 	}
 }
+
+// TestAddFileToIndexChanged verifies the git-style skip: re-adding an
+// unchanged file reports no change, while new/changed content or a new OS
+// variant still does.
+func TestAddFileToIndexChanged(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	repo, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := repo.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// First add of a new file → changed
+	fpath := filepath.Join(dir, "f.txt")
+	ioutil.WriteFile(fpath, []byte("content"), 0644)
+	changed, err := repo.AddFileToIndex(fpath, 0, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected first add to report a change")
+	}
+
+	// Same content again → skipped
+	changed, err = repo.AddFileToIndex(fpath, 0, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("expected unchanged re-add to be skipped")
+	}
+
+	// Modified content → changed
+	ioutil.WriteFile(fpath, []byte("changed content"), 0644)
+	changed, err = repo.AddFileToIndex(fpath, 0, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected modified file to report a change")
+	}
+
+	// Same path with a different OS mask is a new variant → changed
+	changed, err = repo.AddFileToIndex(fpath, OSWin, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected new OS variant to report a change")
+	}
+
+	// Empty directory: first add changed, repeat skipped
+	subdir := filepath.Join(dir, "emptydir")
+	if err := os.Mkdir(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	changed, err = repo.AddFileToIndex(subdir, 0, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("expected first dir add to report a change")
+	}
+	changed, err = repo.AddFileToIndex(subdir, 0, idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("expected unchanged dir re-add to be skipped")
+	}
+}

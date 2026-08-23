@@ -227,8 +227,12 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
-		if err := r.AddFileToIndex(path, 0, idx); err != nil {
+		changed, err := r.AddFileToIndex(path, 0, idx)
+		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil // already in the index with the same content
 		}
 		(*added)++
 		display := relPath(r, path)
@@ -270,8 +274,12 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		return err
 	}
 	if len(entries) == 0 {
-		if err := r.AddFileToIndex(path, 0, idx); err != nil {
+		changed, err := r.AddFileToIndex(path, 0, idx)
+		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil // already in the index with the same content
 		}
 		(*added)++
 		display := relPath(r, path) + "/"
@@ -339,8 +347,12 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			}
 			mask = repo.MaskFromOSExpr(inc, exc)
 		}
-		if err := r.AddFileToIndex(path, mask, idx); err != nil {
+		changed, err := r.AddFileToIndex(path, mask, idx)
+		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil // already in the index with the same content
 		}
 		(*added)++
 		display := relPath(r, path)
@@ -383,8 +395,12 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		return err
 	}
 	if len(entries) == 0 {
-		if err := r.AddFileToIndex(path, 0, idx); err != nil {
+		changed, err := r.AddFileToIndex(path, 0, idx)
+		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil // already in the index with the same content
 		}
 		(*added)++
 		display := relPath(r, path) + "/"

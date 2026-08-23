@@ -500,7 +500,7 @@ func TestStatusTrackedEmptyDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.AddFileToIndex(filepath.Join(dir, "e"), 0, idx); err != nil {
+	if _, err := repo.AddFileToIndex(filepath.Join(dir, "e"), 0, idx); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.SaveIndex(idx); err != nil {

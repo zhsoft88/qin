@@ -131,29 +131,35 @@ func (r *Repository) addFileInternal(filePath string, oss uint8) error {
 	if err != nil {
 		return err
 	}
-	if err := r.AddFileToIndex(filePath, oss, idx); err != nil {
+	changed, err := r.AddFileToIndex(filePath, oss, idx)
+	if err != nil {
 		return err
+	}
+	if !changed {
+		return nil // nothing to save
 	}
 	return r.SaveIndex(idx)
 }
 
 // AddFileToIndex processes a single file and adds it to a pre-loaded index.
 // oss is the OS bitmask (0 = all OSes) and is used as the key discriminator.
+// Returns whether the index entry was actually written: an existing entry
+// with the same object hash and mode is left untouched (git-style skip).
 // Does NOT save the index — caller must call SaveIndex.
-func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) error {
+func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (bool, error) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
+		return false, fmt.Errorf("resolve path: %w", err)
 	}
 
 	relPath, err := filepath.Rel(r.Path, absPath)
 	if err != nil {
-		return fmt.Errorf("path outside repository: %w", err)
+		return false, fmt.Errorf("path outside repository: %w", err)
 	}
 
 	fi, err := os.Lstat(absPath)
 	if err != nil {
-		return fmt.Errorf("lstat file: %w", err)
+		return false, fmt.Errorf("lstat file: %w", err)
 	}
 
 	isSymlink := fi.Mode()&os.ModeSymlink != 0
@@ -162,42 +168,45 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) erro
 		// Allow empty directories
 		empty, _ := isDirEmpty(absPath)
 		if !empty {
-			return fmt.Errorf("cannot add non-empty directory: %s", filePath)
+			return false, fmt.Errorf("cannot add non-empty directory: %s", filePath)
 		}
 		key := entryKey(filepath.ToSlash(relPath), oss)
+		if e, ok := idx.Entries[key]; ok && e.Mode == DirMode {
+			return false, nil // unchanged — already in the index
+		}
 		idx.Entries[key] = IndexEntry{
 			Mode:  DirMode,
 			Mtime: fi.ModTime().UnixNano(),
 			OSS:   oss,
 		}
-		return nil
+		return true, nil
 	}
 
 	ignorer, err := r.LoadIgnoreMatcher()
 	if err != nil {
-		return err
+		return false, err
 	}
 	relFormatted := filepath.ToSlash(relPath)
 	if ignorer.Match(relFormatted, false) {
-		return fmt.Errorf("matches .qinignore")
+		return false, fmt.Errorf("matches .qinignore")
 	}
 
 	var data []byte
 	if isSymlink {
 		target, err := os.Readlink(absPath)
 		if err != nil {
-			return fmt.Errorf("read symlink: %w", err)
+			return false, fmt.Errorf("read symlink: %w", err)
 		}
 		data = []byte(target)
 	} else {
 		data, err = ioutil.ReadFile(absPath)
 		if err != nil {
-			return fmt.Errorf("read file: %w", err)
+			return false, fmt.Errorf("read file: %w", err)
 		}
 
 		// Reject LFS placeholder files — user must lfs-pull first
 		if string(data) == "lo-lfs" && r.hasAnyLazyEntry(filepath.ToSlash(relPath)) {
-			return fmt.Errorf("cannot add placeholder file '%s': use 'lfs-pull' to fetch real content first", filePath)
+			return false, fmt.Errorf("cannot add placeholder file '%s': use 'lfs-pull' to fetch real content first", filePath)
 		}
 	}
 
@@ -210,12 +219,15 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) erro
 		h, err = r.StoreChunkedFile(data)
 	}
 	if err != nil {
-		return fmt.Errorf("store file: %w", err)
+		return false, fmt.Errorf("store file: %w", err)
 	}
 
 	mode := uint32(fi.Mode())
 
 	key := entryKey(filepath.ToSlash(relPath), oss)
+	if e, ok := idx.Entries[key]; ok && e.Hash == h && e.Mode == mode {
+		return false, nil // unchanged — already in the index
+	}
 	idx.Entries[key] = IndexEntry{
 		Hash:        h,
 		ContentHash: contentHash,
@@ -224,7 +236,7 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) erro
 		Mtime:       fi.ModTime().UnixNano(),
 		OSS:         oss,
 	}
-	return nil
+	return true, nil
 }
 
 // isDirEmpty checks whether a directory has no entries.
@@ -262,12 +274,18 @@ func (r *Repository) AddFilesOSMatch(files []string, expr string) error {
 		return err
 	}
 
+	changedAny := false
 	for _, f := range files {
-		if err := r.AddFileToIndex(f, mask, idx); err != nil {
+		changed, err := r.AddFileToIndex(f, mask, idx)
+		if err != nil {
 			return fmt.Errorf("add %s: %w", f, err)
 		}
+		changedAny = changedAny || changed
 	}
 
+	if !changedAny {
+		return nil // nothing to save
+	}
 	return r.SaveIndex(idx)
 }
 
