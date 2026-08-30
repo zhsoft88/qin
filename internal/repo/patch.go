@@ -136,7 +136,9 @@ func (r *Repository) ApplyPatch(data []byte) error {
 				continue
 			}
 			sizeStr := parts[0]
-			encPath := parts[1]
+			// Modified entries carry a trailing "  (oldhash -> newhash)"
+			// suffix that must be stripped before resolving the path.
+			encPath := stripHashRangeSuffix(parts[1])
 
 			size, err := strconv.ParseInt(sizeStr, 10, 64)
 			if err != nil {
@@ -196,6 +198,7 @@ func (r *Repository) ApplyPatch(data []byte) error {
 				ContentHash: contentHash,
 				Size:        size,
 				Mode:        0644,
+				OSS:         osID,
 				Mtime:       mt,
 			}
 
@@ -241,6 +244,36 @@ func (r *Repository) ApplyPatch(data []byte) error {
 	}
 
 	return scanner.Err()
+}
+
+// stripHashRangeSuffix removes a trailing "  (oldhash -> newhash)" suffix
+// (16-hex-char short hashes) from a RenderPatch modified-entry path.
+func stripHashRangeSuffix(s string) string {
+	idx := strings.LastIndex(s, "  (")
+	if idx < 0 {
+		return s
+	}
+	rest := s[idx+3:]
+	if !strings.HasSuffix(rest, ")") {
+		return s
+	}
+	parts := strings.SplitN(strings.TrimSuffix(rest, ")"), " -> ", 2)
+	if len(parts) == 2 && isShortHash(parts[0]) && isShortHash(parts[1]) {
+		return s[:idx]
+	}
+	return s
+}
+
+func isShortHash(s string) bool {
+	if len(s) != 16 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // parsePatchPath extracts clean path and OS tag from an encoded patch path.

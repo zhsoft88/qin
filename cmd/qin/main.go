@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -42,39 +43,41 @@ func main() {
 		os.Exit(1)
 	}
 	cmds := map[string]command{
-		"init":        {"init", "Initialize a new repository", runInit},
-		"add":         {"add", "Stage file(s) for commit", runAdd},
-		"rm":          {"rm", "Remove staged file(s)", runRm},
-		"commit":      {"commit", "Create a commit from staged files", runCommit},
-		"log":         {"log", "Show commit history [--graph]", runLog},
-		"status":      {"status", "Show working tree status", runStatus},
-		"cat":         {"cat", "Print an object's content", runCat},
-		"ls":          {"ls", "List staged files", runLs},
-		"checkout":    {"checkout", "Restore files from a commit", runCheckout},
-		"switch":      {"switch", "Switch to an existing branch", runSwitch},
-		"branch":      {"branch", "List, create, or delete branches", runBranch},
-		"tag":         {"tag", "List or create tags", runTag},
-		"diff":        {"diff", "Show file-level changes", runDiff},
-		"merge":       {"merge", "Merge a branch into the current branch", runMerge},
-		"rebase":      {"rebase", "Rebase current branch onto another branch", runRebase},
-		"cherry-pick": {"cherry-pick", "Apply changes from an existing commit", runCherryPick},
-		"stash":       {"stash", "Stash or pop working tree changes", runStash},
-		"remote":      {"remote", "Manage remotes", runRemote},
-		"push":        {"push", "Push to remote", runPush},
-		"fetch":       {"fetch", "Fetch from remote", runFetch},
-		"pull":        {"pull", "Pull from remote and merge", runPull},
-		"clone":       {"clone", "Clone a repository [--lazy]", runClone},
-		"lfs":         {"lfs", "Manage large files (status, pull)", runLfs},
-		"serve":       {"serve", "Start HTTP server for remote access [--addr] [--base-path]", runServe},
-		"show":        {"show", "Show file content for the given OS [--os <os>]", runShow},
-		"config":      {"config", "Get or set configuration values [--unset]", runConfig},
-		"reset":       {"reset", "Reset HEAD [--soft | --mixed | --hard] [<commit>]", runReset},
-		"restore":     {"restore", "Restore working tree or index files", runRestore},
-		"apply":       {"apply", "Apply a patch to the working tree", runApply},
-		"submodule":   {"submodule", "Manage submodules", runSubmodule},
-		"lost-found":  {"lost-found", "List dangling (unreachable) commits", runLostFound},
-		"gc":          {"gc", "Prune dangling objects to reclaim space", runGC},
-		"version":     {"version", "Show version information", runVersion},
+		"init":         {"init", "Initialize a new repository", runInit},
+		"add":          {"add", "Stage file(s) for commit", runAdd},
+		"rm":           {"rm", "Remove staged file(s)", runRm},
+		"commit":       {"commit", "Create a commit from staged files", runCommit},
+		"log":          {"log", "Show commit history [--graph]", runLog},
+		"status":       {"status", "Show working tree status", runStatus},
+		"cat":          {"cat", "Print an object's content", runCat},
+		"ls":           {"ls", "List staged files", runLs},
+		"checkout":     {"checkout", "Restore files from a commit", runCheckout},
+		"switch":       {"switch", "Switch to an existing branch", runSwitch},
+		"branch":       {"branch", "List, create, or delete branches", runBranch},
+		"tag":          {"tag", "List or create tags", runTag},
+		"diff":         {"diff", "Show file-level changes", runDiff},
+		"merge":        {"merge", "Merge a branch into the current branch", runMerge},
+		"rebase":       {"rebase", "Rebase current branch onto another branch", runRebase},
+		"cherry-pick":  {"cherry-pick", "Apply changes from an existing commit", runCherryPick},
+		"stash":        {"stash", "Stash or pop working tree changes", runStash},
+		"remote":       {"remote", "Manage remotes", runRemote},
+		"push":         {"push", "Push to remote", runPush},
+		"fetch":        {"fetch", "Fetch from remote", runFetch},
+		"pull":         {"pull", "Pull from remote and merge", runPull},
+		"clone":        {"clone", "Clone a repository [--lazy]", runClone},
+		"lfs":          {"lfs", "Manage large files (status, pull)", runLfs},
+		"serve":        {"serve", "Start HTTP server for remote access [--addr] [--base-path]", runServe},
+		"show":         {"show", "Show file content for the given OS [--os <os>]", runShow},
+		"config":       {"config", "Get or set configuration values [--unset]", runConfig},
+		"reset":        {"reset", "Reset HEAD [--soft | --mixed | --hard] [<commit>]", runReset},
+		"restore":      {"restore", "Restore working tree or index files", runRestore},
+		"apply":        {"apply", "Apply a patch to the working tree", runApply},
+		"format-patch": {"format-patch", "Export commits as numbered patch files", runFormatPatch},
+		"am":           {"am", "Apply patch file(s) as commits", runAm},
+		"submodule":    {"submodule", "Manage submodules", runSubmodule},
+		"lost-found":   {"lost-found", "List dangling (unreachable) commits", runLostFound},
+		"gc":           {"gc", "Prune dangling objects to reclaim space", runGC},
+		"version":      {"version", "Show version information", runVersion},
 		// Aliases
 		"st": {"st", "Alias for status", runStatus},
 		"co": {"co", "Alias for checkout", runCheckout},
@@ -123,6 +126,8 @@ Commands:
   reset [--soft|--mixed|--hard] [<commit>]  Reset HEAD/index/working tree
   restore [--staged] <file>...       Restore working tree or index files
   apply [<patchfile>]            Apply a patch to the working tree (default: stdin)
+  format-patch <base>..<head>    Export commits as numbered patch files (-N <n> <head> for last N)
+  am <patchfile>...              Apply patch file(s) as commits (default: stdin)
   submodule add <url> <path>    Add a submodule
   submodule update [--init]     Update submodules
   submodule status              Show submodule status
@@ -1789,6 +1794,84 @@ func runApply(args []string) error {
 		return fmt.Errorf("apply patch: %w", err)
 	}
 	return nil
+}
+
+// ---- format-patch / am ----
+func runFormatPatch(args []string) error {
+	r, err := findRepo()
+	if err != nil {
+		return err
+	}
+
+	var base, head core.Hash
+	if len(args) >= 3 && args[0] == "-N" {
+		n, err := strconv.Atoi(args[1])
+		if err != nil || n <= 0 {
+			return fmt.Errorf("usage: lo format-patch -N <n> <head>")
+		}
+		head, err = r.ResolveRef(args[2])
+		if err != nil {
+			return fmt.Errorf("resolve ref: %w", err)
+		}
+		cur := head
+		for i := 0; i < n && !cur.IsZero(); i++ {
+			c, err := r.LoadCommit(cur)
+			if err != nil {
+				return fmt.Errorf("load commit: %w", err)
+			}
+			if len(c.Parents) == 0 {
+				cur = core.Hash{}
+				break
+			}
+			cur = c.Parents[0]
+		}
+		base = cur
+	} else if len(args) == 1 {
+		parts := strings.SplitN(args[0], "..", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return fmt.Errorf("usage: lo format-patch <base>..<head> | -N <n> <head>")
+		}
+		base, err = r.ResolveRef(parts[0])
+		if err != nil {
+			return fmt.Errorf("resolve base: %w", err)
+		}
+		head, err = r.ResolveRef(parts[1])
+		if err != nil {
+			return fmt.Errorf("resolve head: %w", err)
+		}
+	} else {
+		return fmt.Errorf("usage: lo format-patch <base>..<head> | -N <n> <head>")
+	}
+
+	files, err := r.FormatPatch(base, head)
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("nothing to export")
+	}
+	for _, f := range files {
+		if err := ioutil.WriteFile(f.Filename, []byte(f.Render()), 0644); err != nil {
+			return fmt.Errorf("write %s: %w", f.Filename, err)
+		}
+		fmt.Printf("wrote %s\n", f.Filename)
+	}
+	return nil
+}
+
+func runAm(args []string) error {
+	r, err := findRepo()
+	if err != nil {
+		return err
+	}
+	if len(args) > 0 {
+		return r.ApplyMailbox(args)
+	}
+	data, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("read stdin: %w", err)
+	}
+	return r.ApplyPatchFile(data)
 }
 func runSubmodule(args []string) error {
 	if len(args) == 0 {

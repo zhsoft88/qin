@@ -100,8 +100,14 @@ type Commit struct {
 }
 
 // WriteCommit creates and stores a commit from the staged index.
-// Uses the current HEAD as the parent commit.
+// Uses the current HEAD as the parent commit and the current time.
 func (r *Repository) WriteCommit(author, message string) (core.Hash, error) {
+	return r.WriteCommitAt(author, message, time.Now())
+}
+
+// WriteCommitAt is like WriteCommit but records the given time as the commit time.
+// It is used by `am` to preserve the original commit date when replaying patches.
+func (r *Repository) WriteCommitAt(author, message string, when time.Time) (core.Hash, error) {
 	treeHash, err := r.WriteTree()
 	if err != nil {
 		return core.Hash{}, err
@@ -125,7 +131,7 @@ func (r *Repository) WriteCommit(author, message string) (core.Hash, error) {
 		Parents: parents,
 		Author:  author,
 		Message: message,
-		Time:    time.Now(),
+		Time:    when,
 	}
 
 	content, err := core.SerializeJSON(commit)
