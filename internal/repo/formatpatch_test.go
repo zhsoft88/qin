@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -359,5 +360,78 @@ func TestApplyPatchOutsideRepo(t *testing.T) {
 	}
 	if _, err := os.Stat(victim); err != nil {
 		t.Fatalf("file outside the repo was removed: %v", err)
+	}
+}
+
+// TestApplyPatchAcceptsFormatPatchEnvelope covers the `apply` entry point,
+// which is handed whichever file the user names — a bare RenderPatch body, or
+// a whole format-patch file.
+//
+// A format-patch file carries a mail envelope ahead of the body, and each of
+// its lines reads as an operation: the bare "---" separator parses as a delete
+// of a file named "--", whose separator-consumption loop then swallows the
+// first real operation, and a message line beginning with "-" parses as a
+// delete of whatever follows it. The envelope has to be stripped first.
+func TestApplyPatchAcceptsFormatPatchEnvelope(t *testing.T) {
+	r, dir := newTempRepo(t)
+
+	content := []byte("NEWFILE\n")
+	body := fmt.Sprintf("+ %d added.txt\n%s====\n", len(content), base64Encode(content))
+	p := &PatchFile{
+		Author: "Alice <alice@example.com>",
+		Date:   time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
+		// Bullet lines exercise the message block, which sits between the
+		// headers and the "---" separator.
+		Message: "add a file\n\n- first bullet\n- second bullet",
+		Body:    body,
+	}
+
+	if err := r.ApplyPatch([]byte(p.Render())); err != nil {
+		t.Fatalf("apply of a format-patch file failed: %v", err)
+	}
+
+	got, err := ioutil.ReadFile(filepath.Join(dir, "added.txt"))
+	if err != nil {
+		t.Fatalf("body was not applied: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Fatalf("wrote %q, want %q", got, content)
+	}
+
+	files, err := r.ListFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := files["added.txt"]; !ok {
+		t.Fatalf("added.txt missing from the index: %v", files)
+	}
+	// The envelope's own lines must not have been taken for operations.
+	for _, bogus := range []string{"--", "first bullet", "second bullet", "add a file"} {
+		if _, ok := files[bogus]; ok {
+			t.Fatalf("envelope line %q was applied as a path", bogus)
+		}
+	}
+}
+
+// TestApplyPatchAcceptsBareBody is the counterpart of the envelope test: the
+// body on its own, as ApplyPatchFile hands it to ApplyPatch, must still be
+// applied directly. ParsePatchFile finds no "---" separator in it and returns
+// an error, so the data is used as-is.
+func TestApplyPatchAcceptsBareBody(t *testing.T) {
+	r, dir := newTempRepo(t)
+
+	content := []byte("BARE\n")
+	body := fmt.Sprintf("+ %d bare.txt\n%s====\n", len(content), base64Encode(content))
+
+	if err := r.ApplyPatch([]byte(body)); err != nil {
+		t.Fatalf("apply of a bare body failed: %v", err)
+	}
+
+	got, err := ioutil.ReadFile(filepath.Join(dir, "bare.txt"))
+	if err != nil {
+		t.Fatalf("body was not applied: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Fatalf("wrote %q, want %q", got, content)
 	}
 }

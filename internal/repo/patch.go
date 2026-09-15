@@ -106,8 +106,25 @@ func base64Decode(s string) ([]byte, error) {
 }
 
 // ApplyPatch applies a patch to the working tree and index.
-// The patch format is produced by RenderPatch.
+// The patch body format is produced by RenderPatch.
 func (r *Repository) ApplyPatch(data []byte) error {
+	// `apply` takes whichever file the user names, which may be a whole
+	// format-patch file rather than a bare body. Strip the mail envelope when
+	// there is one: every line of it would otherwise read as an operation,
+	// since the format has no header syntax to tell them apart. The bare
+	// "---" separator parses as a delete of a file named "--", whose
+	// separator-consumption loop then swallows the first real operation, and
+	// a message line beginning with "-" parses as a delete of whatever
+	// follows it.
+	//
+	// A bare body never parses as an envelope — its operation lines all start
+	// with "+ ", "~ " or "- ", and base64 contains no dash, so no line can be
+	// exactly "---" — and ParsePatchFile reports the missing separator, which
+	// leaves the data to be applied unchanged.
+	if p, err := ParsePatchFile(data); err == nil {
+		data = []byte(p.Body)
+	}
+
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	idx, err := r.LoadIndex()
 	if err != nil {
