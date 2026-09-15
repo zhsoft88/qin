@@ -59,6 +59,21 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		idxMtime = fi.ModTime().UnixNano()
 	}
 
+	// Optional change monitor (core.fsmonitor, built into qin). It only
+	// tells us which paths may be skipped; every conclusion below is still
+	// reached by the same checks as before. Restricted to unfiltered scans
+	// for the same reason as the untracked cache: the persisted dirty set is
+	// repo-wide, and a partial scan must not overwrite it as if it were
+	// complete.
+	var mon *fsmonitorChanges
+	var mustCheck map[string]bool
+	if len(filterPaths) == 0 && include == nil && exclude == nil {
+		mon, _ = fsmonitorBackend(r)
+		if mon != nil {
+			mustCheck = mon.MustCheck
+		}
+	}
+
 	s := &Status{
 		Branch: r.CurrentBranch(),
 	}
@@ -159,6 +174,14 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		if len(filterPaths) > 0 && !matchFilterPath(path, filterPaths) {
 			continue // not scanned; the deletion check below still applies
 		}
+		// Monitor fast path: the monitor reported no change for this path, so it
+		// still exists with the content the index recorded. Skip the lstat
+		// outright — that syscall is what this feature is for. Restricted to
+		// entries that carry stat info, so entries the stat fast path below
+		// would never trust are not skipped either.
+		if mustCheck != nil && entry.Mtime != 0 && !mustCheck[path] {
+			continue
+		}
 		fullPath := filepath.Join(r.Path, path)
 		fi, err := os.Lstat(fullPath)
 		if err != nil {
@@ -191,6 +214,11 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 
 	// Deleted check: every visible path (even outside the filter) must exist
 	for path := range allVisible {
+		// A path the monitor never reported as changed still exists; only
+		// paths it did report need the lstat.
+		if mustCheck != nil && !mustCheck[path] {
+			continue
+		}
 		fullPath := filepath.Join(r.Path, path)
 		if _, err := os.Lstat(fullPath); os.IsNotExist(err) {
 			s.Deleted = append(s.Deleted, path)
@@ -324,6 +352,12 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	sort.Strings(s.Untracked)
 	sort.Strings(s.Modified)
 	sort.Strings(s.Deleted)
+
+	// Advance the monitor's clock and carry the deviations forward. A
+	// deviation is a persistent condition but the monitor reports it only
+	// once, so the paths found deviant here are remembered and re-checked
+	// until the index matches them again. A nil mon is a no-op.
+	mon.save(r, s.Deleted, s.Modified)
 
 	return s, nil
 }

@@ -7,13 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
 	Core struct {
-		ChunkMinSize    int `json:"chunk_min_size"`
+		ChunkMinSize   int `json:"chunk_min_size"`
 		ChunkThreshold int `json:"chunk_threshold"`
-		ChunkMaxSize    int `json:"chunk_max_size"`
+		ChunkMaxSize   int `json:"chunk_max_size"`
+		// Fsmonitor is "false" (default, off) or "true" (use the built-in
+		// change monitor). Empty is treated as off.
+		Fsmonitor string `json:"fsmonitor,omitempty"`
 	} `json:"core"`
 	Diff struct {
 		MaxSize  int `json:"max_size"`  // skip content diff if file exceeds this (bytes)
@@ -27,11 +31,12 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	c := &Config{}
-	c.Core.ChunkMinSize = 1024 * 1024      // 1MB
-	c.Core.ChunkThreshold = 4 * 1024 * 1024  // 4MB
-	c.Core.ChunkMaxSize = 8 * 1024 * 1024  // 8MB
-	c.Diff.MaxSize = 512 * 1024            // 512KB
-	c.Diff.MaxLines = 2000                 // lines
+	c.Core.ChunkMinSize = 1024 * 1024       // 1MB
+	c.Core.ChunkThreshold = 4 * 1024 * 1024 // 4MB
+	c.Core.ChunkMaxSize = 8 * 1024 * 1024   // 8MB
+	c.Core.Fsmonitor = FsmonitorOff
+	c.Diff.MaxSize = 512 * 1024 // 512KB
+	c.Diff.MaxLines = 2000      // lines
 	return c
 }
 
@@ -66,13 +71,14 @@ func SaveConfig(repoPath string, cfg *Config) error {
 
 // configKeys maps dotted key names to their descriptions.
 var configKeys = map[string]string{
-	"core.chunk_min_size":    "Minimum chunk size in bytes (default 1048576)",
-	"core.chunk_threshold":    "Average chunk size in bytes (default 4194304)",
-	"core.chunk_max_size":    "Maximum chunk size in bytes (default 8388608)",
-		"diff.max_size":         "Skip content diff if file exceeds this in bytes (default 524288)",
-	"diff.max_lines":        "Skip line diff if file exceeds this many lines (default 2000)",
-	"user.name":             "User name for commit author",
-	"user.email":            "User email for commit author",
+	"core.chunk_min_size":  "Minimum chunk size in bytes (default 1048576)",
+	"core.chunk_threshold": "Average chunk size in bytes (default 4194304)",
+	"core.chunk_max_size":  "Maximum chunk size in bytes (default 8388608)",
+	"core.fsmonitor":       "Skip unchanged files in status using the built-in change monitor: false | true",
+	"diff.max_size":        "Skip content diff if file exceeds this in bytes (default 524288)",
+	"diff.max_lines":       "Skip line diff if file exceeds this many lines (default 2000)",
+	"user.name":            "User name for commit author",
+	"user.email":           "User email for commit author",
 }
 
 // ConfigGet returns the value of a config key as a string.
@@ -84,6 +90,11 @@ func ConfigGet(cfg *Config, key string) (string, error) {
 		return strconv.Itoa(cfg.Core.ChunkThreshold), nil
 	case "core.chunk_max_size":
 		return strconv.Itoa(cfg.Core.ChunkMaxSize), nil
+	case "core.fsmonitor":
+		if cfg.Core.Fsmonitor == "" {
+			return FsmonitorOff, nil
+		}
+		return cfg.Core.Fsmonitor, nil
 	case "diff.max_size":
 		return strconv.Itoa(cfg.Diff.MaxSize), nil
 	case "diff.max_lines":
@@ -118,6 +129,14 @@ func ConfigSet(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid integer: %s", value)
 		}
 		cfg.Core.ChunkMaxSize = v
+	case "core.fsmonitor":
+		if !ValidFsmonitorValue(value) {
+			return fmt.Errorf("invalid core.fsmonitor value: %s (use false or true)", value)
+		}
+		cfg.Core.Fsmonitor = strings.ToLower(strings.TrimSpace(value))
+		if cfg.Core.Fsmonitor == "" {
+			cfg.Core.Fsmonitor = FsmonitorOff
+		}
 	case "diff.max_size":
 		v, err := strconv.Atoi(value)
 		if err != nil {
@@ -149,6 +168,8 @@ func ConfigUnset(cfg *Config, key string) error {
 		cfg.Core.ChunkThreshold = 4 * 1024 * 1024
 	case "core.chunk_max_size":
 		cfg.Core.ChunkMaxSize = 8 * 1024 * 1024
+	case "core.fsmonitor":
+		cfg.Core.Fsmonitor = FsmonitorOff
 	case "diff.max_size":
 		cfg.Diff.MaxSize = 512 * 1024
 	case "diff.max_lines":

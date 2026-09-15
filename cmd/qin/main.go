@@ -43,41 +43,42 @@ func main() {
 		os.Exit(1)
 	}
 	cmds := map[string]command{
-		"init":         {"init", "Initialize a new repository", runInit},
-		"add":          {"add", "Stage file(s) for commit", runAdd},
-		"rm":           {"rm", "Remove staged file(s)", runRm},
-		"commit":       {"commit", "Create a commit from staged files", runCommit},
-		"log":          {"log", "Show commit history [--graph]", runLog},
-		"status":       {"status", "Show working tree status", runStatus},
-		"cat":          {"cat", "Print an object's content", runCat},
-		"ls":           {"ls", "List staged files", runLs},
-		"checkout":     {"checkout", "Restore files from a commit", runCheckout},
-		"switch":       {"switch", "Switch to an existing branch", runSwitch},
-		"branch":       {"branch", "List, create, or delete branches", runBranch},
-		"tag":          {"tag", "List or create tags", runTag},
-		"diff":         {"diff", "Show file-level changes", runDiff},
-		"merge":        {"merge", "Merge a branch into the current branch", runMerge},
-		"rebase":       {"rebase", "Rebase current branch onto another branch", runRebase},
-		"cherry-pick":  {"cherry-pick", "Apply changes from an existing commit", runCherryPick},
-		"stash":        {"stash", "Stash or pop working tree changes", runStash},
-		"remote":       {"remote", "Manage remotes", runRemote},
-		"push":         {"push", "Push to remote", runPush},
-		"fetch":        {"fetch", "Fetch from remote", runFetch},
-		"pull":         {"pull", "Pull from remote and merge", runPull},
-		"clone":        {"clone", "Clone a repository [--lazy]", runClone},
-		"lfs":          {"lfs", "Manage large files (status, pull)", runLfs},
-		"serve":        {"serve", "Start HTTP server for remote access [--addr] [--base-path]", runServe},
-		"show":         {"show", "Show file content for the given OS [--os <os>]", runShow},
-		"config":       {"config", "Get or set configuration values [--unset]", runConfig},
-		"reset":        {"reset", "Reset HEAD [--soft | --mixed | --hard] [<commit>]", runReset},
-		"restore":      {"restore", "Restore working tree or index files", runRestore},
-		"apply":        {"apply", "Apply a patch to the working tree", runApply},
-		"format-patch": {"format-patch", "Export commits as numbered patch files", runFormatPatch},
-		"am":           {"am", "Apply patch file(s) as commits", runAm},
-		"submodule":    {"submodule", "Manage submodules", runSubmodule},
-		"lost-found":   {"lost-found", "List dangling (unreachable) commits", runLostFound},
-		"gc":           {"gc", "Prune dangling objects to reclaim space", runGC},
-		"version":      {"version", "Show version information", runVersion},
+		"init":              {"init", "Initialize a new repository", runInit},
+		"add":               {"add", "Stage file(s) for commit", runAdd},
+		"rm":                {"rm", "Remove staged file(s)", runRm},
+		"commit":            {"commit", "Create a commit from staged files", runCommit},
+		"log":               {"log", "Show commit history [--graph]", runLog},
+		"status":            {"status", "Show working tree status", runStatus},
+		"cat":               {"cat", "Print an object's content", runCat},
+		"ls":                {"ls", "List staged files", runLs},
+		"checkout":          {"checkout", "Restore files from a commit", runCheckout},
+		"switch":            {"switch", "Switch to an existing branch", runSwitch},
+		"branch":            {"branch", "List, create, or delete branches", runBranch},
+		"tag":               {"tag", "List or create tags", runTag},
+		"diff":              {"diff", "Show file-level changes", runDiff},
+		"merge":             {"merge", "Merge a branch into the current branch", runMerge},
+		"rebase":            {"rebase", "Rebase current branch onto another branch", runRebase},
+		"cherry-pick":       {"cherry-pick", "Apply changes from an existing commit", runCherryPick},
+		"stash":             {"stash", "Stash or pop working tree changes", runStash},
+		"remote":            {"remote", "Manage remotes", runRemote},
+		"push":              {"push", "Push to remote", runPush},
+		"fetch":             {"fetch", "Fetch from remote", runFetch},
+		"pull":              {"pull", "Pull from remote and merge", runPull},
+		"clone":             {"clone", "Clone a repository [--lazy]", runClone},
+		"lfs":               {"lfs", "Manage large files (status, pull)", runLfs},
+		"serve":             {"serve", "Start HTTP server for remote access [--addr] [--base-path]", runServe},
+		"show":              {"show", "Show file content for the given OS [--os <os>]", runShow},
+		"config":            {"config", "Get or set configuration values [--unset]", runConfig},
+		"reset":             {"reset", "Reset HEAD [--soft | --mixed | --hard] [<commit>]", runReset},
+		"restore":           {"restore", "Restore working tree or index files", runRestore},
+		"apply":             {"apply", "Apply a patch to the working tree", runApply},
+		"format-patch":      {"format-patch", "Export commits as numbered patch files", runFormatPatch},
+		"am":                {"am", "Apply patch file(s) as commits", runAm},
+		"submodule":         {"submodule", "Manage submodules", runSubmodule},
+		"fsmonitor--daemon": {"fsmonitor--daemon", "Manage the built-in change monitor (start | run | stop | status)", runFsmonitorDaemon},
+		"lost-found":        {"lost-found", "List dangling (unreachable) commits", runLostFound},
+		"gc":                {"gc", "Prune dangling objects to reclaim space", runGC},
+		"version":           {"version", "Show version information", runVersion},
 		// Aliases
 		"st": {"st", "Alias for status", runStatus},
 		"co": {"co", "Alias for checkout", runCheckout},
@@ -134,6 +135,9 @@ Commands:
   lost-found                    List dangling (unreachable) commits
   version                       Show version information
   gc                            Prune dangling objects to reclaim space
+  fsmonitor--daemon start|stop|status  Built-in change monitor (core.fsmonitor)
+  fsmonitor--daemon run [--repo <path>] [--poll-interval <dur>]
+                                Run the monitor in the foreground
 
 OS identifiers: win, mac, linux`)
 }
@@ -812,7 +816,6 @@ func runStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-
 	var filter []string
 	for _, a := range args {
 		abs, err := filepath.Abs(a)
@@ -825,6 +828,12 @@ func runStatus(args []string) error {
 		}
 		filter = append(filter, filepath.ToSlash(rel))
 	}
+
+	// Make sure a change monitor is running, if this repository asks for one.
+	// It is started for the runs that follow this one: the daemon publishes
+	// itself only after walking the tree, which is not something a status
+	// command should wait for, so this run scans everything either way.
+	noteFsmonitorFallback(r)
 
 	s, err := r.WorkTreeStatus()
 	if err != nil {
@@ -1685,6 +1694,217 @@ func runConfig(args []string) error {
 	default:
 		return fmt.Errorf("usage: lo config [<key> [<value>]]")
 	}
+}
+
+// ---- fsmonitor--daemon ----
+//
+// The change monitor is built into lo: a background process watches the
+// working tree through the native API of whatever platform this is, and status
+// reads the changes it records instead of stat-ing every tracked file. These
+// verbs manage that process's lifecycle.
+//
+// noteFsmonitorFallback starts that monitor on demand, and says why it could
+// not when it could not.
+//
+// Silence is the normal case: a monitor that is running, or one that was just
+// started, is not news — the daemon is an implementation detail of a fast
+// status, and announcing it on every invocation would be noise. The two cases
+// worth a line are the ones where the user asked for something they are not
+// getting: a platform that cannot host a monitor at all, and a start that
+// failed for a reason that will not fix itself. Both go to stderr, so status's
+// output stays parseable.
+func noteFsmonitorFallback(r *repo.Repository) {
+	err := r.EnsureFsmonitorDaemon()
+	if err == nil {
+		return
+	}
+	if err == repo.ErrNoMonitor {
+		fmt.Fprintln(os.Stderr,
+			"note: core.fsmonitor is on, but no change-monitor backend is available here; status scans every file")
+		return
+	}
+	fmt.Fprintf(os.Stderr, "note: change monitor not started: %v\n", err)
+}
+
+func runFsmonitorDaemon(args []string) error {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+		args = args[1:]
+	}
+
+	// `run` is the process the other three verbs start, so it takes its
+	// repository explicitly: it is spawned detached, and a detached process
+	// has no meaningful working directory to search upwards from.
+	if sub == "run" {
+		return runFsmonitorDaemonForeground(args)
+	}
+
+	r, err := findRepo()
+	if err != nil {
+		return err
+	}
+	switch sub {
+	case "start":
+		if !r.FsmonitorEnabled() {
+			return fmt.Errorf("core.fsmonitor is off (enable with: lo config core.fsmonitor true)")
+		}
+		if err := r.FsmonitorDaemonStart(); err != nil {
+			if err == repo.ErrDaemonBusy {
+				fmt.Println("a change monitor is already starting; nothing to do")
+				return nil
+			}
+			if err == repo.ErrNoMonitor {
+				return fmt.Errorf("%v: status will keep doing a full scan here", err)
+			}
+			return err
+		}
+		fmt.Println("monitor started; status will skip paths it reports unchanged")
+	case "stop":
+		if err := r.FsmonitorDaemonStop(); err != nil {
+			return err
+		}
+		fmt.Println("monitor stopped for this repository")
+	case "status":
+		return printFsmonitorStatus(r)
+	case "":
+		return fmt.Errorf("usage: lo fsmonitor--daemon start|run|stop|status")
+	default:
+		return fmt.Errorf("unknown fsmonitor--daemon subcommand: %s (use start, run, stop, status)", sub)
+	}
+	return nil
+}
+
+// runFsmonitorDaemonForeground is the daemon itself, in this process.
+//
+// It is normally invoked by `start` as a detached child, but running it by
+// hand is the way to watch it work — and the only way to try the polling
+// backend, which is never selected automatically.
+func runFsmonitorDaemonForeground(args []string) error {
+	path := "."
+	var pollInterval time.Duration
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--repo":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--repo needs a path")
+			}
+			i++
+			path = args[i]
+		case "--poll-interval":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--poll-interval needs a duration")
+			}
+			i++
+			d, err := time.ParseDuration(args[i])
+			if err != nil {
+				return fmt.Errorf("--poll-interval: %w", err)
+			}
+			pollInterval = d
+		default:
+			return fmt.Errorf("unknown option for fsmonitor--daemon run: %s", args[i])
+		}
+	}
+	r, err := repo.Open(path)
+	if err != nil {
+		return err
+	}
+
+	// A daemon that has been asked to stop should stop, and one that is killed
+	// outright is handled by its successor the ordinary way. Handling the
+	// signal here is what makes Ctrl-C in a terminal work on the foreground
+	// case; detached children are stopped through the stop file instead, since
+	// a new session has no controlling terminal to deliver a signal from.
+	stop := make(chan struct{})
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		close(stop)
+	}()
+
+	logf := func(format string, a ...interface{}) {
+		fmt.Fprintf(os.Stderr, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, a...))
+	}
+	return r.FsmonitorDaemonRun(pollInterval, stop, logf)
+}
+
+func printFsmonitorStatus(r *repo.Repository) error {
+	st := r.FsmonitorDaemonStatus()
+
+	if st.Enabled {
+		fmt.Println("core.fsmonitor = true")
+	} else {
+		cfg := st.ConfigValue
+		if cfg == "" {
+			cfg = "unset"
+		}
+		fmt.Printf("core.fsmonitor = false (%s); status always does a full scan\n", cfg)
+		return nil
+	}
+
+	if st.Available {
+		fmt.Println("platform support: event-driven backend available")
+	} else {
+		// Worth saying plainly: on this platform no monitor can ever save
+		// work, so a user waiting for the fast path is waiting for something
+		// that will not arrive.
+		fmt.Println("platform support: none; no event-driven backend on this platform, status always does a full scan")
+	}
+
+	switch {
+	case st.Record == nil:
+		fmt.Println("daemon: no record (nothing has started one here)")
+	case st.Alive:
+		fmt.Printf("daemon: running (pid %d, heartbeat %s ago)\n", st.Record.PID, st.BeatAge.Round(time.Millisecond))
+	case st.HasBeat:
+		// The case a user actually meets: killed, or crashed.
+		fmt.Printf("daemon: not running (stale record for pid %d; last heartbeat %s ago)\n",
+			st.Record.PID, st.BeatAge.Round(time.Second))
+	default:
+		fmt.Printf("daemon: not running (record for pid %d, no heartbeat)\n", st.Record.PID)
+	}
+
+	if st.Record != nil {
+		fmt.Printf("backend: %s (event-driven: %v)\n", st.Record.Backend, st.Record.Events)
+		fmt.Printf("generation: %016x\n", st.Record.Gen)
+		fmt.Printf("watching: %s\n", st.Record.Watch)
+		if st.JournalOK {
+			fmt.Printf("journal: %s (%d bytes)\n", filepath.Base(journalName(st.Record.Gen)), st.JournalSize)
+		} else {
+			fmt.Println("journal: missing (the next status will do a full scan)")
+		}
+	}
+
+	switch {
+	case !st.CursorOK:
+		fmt.Println("cursor: none recorded")
+	case st.Record == nil || st.CursorGen != st.Record.Gen:
+		fmt.Println("cursor: belongs to another generation")
+	case st.JournalOK && st.CursorOffset > st.JournalSize:
+		fmt.Println("cursor: past the end of the journal (corrupt)")
+	default:
+		fmt.Printf("cursor: generation %016x, offset %d\n", st.CursorGen, st.CursorOffset)
+	}
+	if st.CursorBackend != "" {
+		fmt.Printf("cursor backend: %s\n", st.CursorBackend)
+	}
+	fmt.Printf("dirty: %d path(s) known to differ from the index\n", st.Dirty)
+
+	if st.Failure != nil {
+		fmt.Printf("last failure: %s (%s)\n",
+			time.Unix(0, st.Failure.At).Format("2006-01-02 15:04:05"), st.Failure.Reason)
+	}
+	if st.Record != nil && !st.Alive {
+		fmt.Printf("log: %s\n", r.DaemonLogPath())
+	}
+	return nil
+}
+
+// journalName mirrors the naming the repository uses for one generation's
+// journal, so the report can name the file without reaching into it.
+func journalName(gen uint64) string {
+	return fmt.Sprintf("journal.%016x", gen)
 }
 
 func runReset(args []string) error {
