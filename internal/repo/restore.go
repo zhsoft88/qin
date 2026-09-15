@@ -2,7 +2,6 @@ package repo
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -19,6 +18,9 @@ func (r *Repository) RestoreFile(filePath string) error {
 	relPath, err := filepath.Rel(r.Path, absPath)
 	if err != nil {
 		return fmt.Errorf("path outside repository: %w", err)
+	}
+	if isOutsideRepo(relPath) {
+		return fmt.Errorf("path outside repository: %s", filePath)
 	}
 
 	idx, err := r.LoadIndex()
@@ -54,12 +56,8 @@ func (r *Repository) RestoreFile(filePath string) error {
 		fileData = blobData
 	}
 
-	fullPath := filepath.Join(r.Path, relFormatted)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return fmt.Errorf("create directory: %w", err)
-	}
-
-	return writeFileFromEntry(fullPath, fileData, entry.Mode)
+	_, err = r.writeWorkTreeFile(relFormatted, fileData, entry.Mode)
+	return err
 }
 
 // RestoreStaged restores the index entry for a file to match HEAD (unstages).
@@ -72,6 +70,9 @@ func (r *Repository) RestoreStaged(filePath string) error {
 	relPath, err := filepath.Rel(r.Path, absPath)
 	if err != nil {
 		return fmt.Errorf("path outside repository: %w", err)
+	}
+	if isOutsideRepo(relPath) {
+		return fmt.Errorf("path outside repository: %s", filePath)
 	}
 
 	relFormatted := filepath.ToSlash(relPath)

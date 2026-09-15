@@ -1,9 +1,9 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
@@ -254,8 +254,7 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 			// Write OURS version
 			if oursEntry.Hash.IsZero() {
 				// Ours deleted it → write removal marker
-				fullPath := filepath.Join(r.Path, cleanPath)
-				os.Remove(fullPath)
+				r.removeWorkTreeFile(cleanPath)
 			} else {
 				if err := r.writeFileFromEntry(cleanPath, oursEntry); err != nil {
 					return nil, fmt.Errorf("write ours %s: %w", cleanPath, err)
@@ -290,8 +289,7 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 	for name, entry := range mergedEntries {
 		// Submodule entry: create directory, add to index, skip content
 		if IsSubmoduleMode(entry.Mode) {
-			fullPath := filepath.Join(r.Path, name)
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
+			if _, err := r.makeWorkTreeDir(name); err != nil {
 				return nil, fmt.Errorf("create submodule dir %s: %w", name, err)
 			}
 			newIndex.Entries[name] = IndexEntry{
@@ -304,7 +302,7 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 		}
 
 		if entry.Hash.IsZero() {
-			if err := os.MkdirAll(filepath.Join(r.Path, name), 0755); err != nil {
+			if _, err := r.makeWorkTreeDir(name); err != nil {
 				return nil, fmt.Errorf("create dir %s: %w", name, err)
 			}
 			newIndex.Entries[name] = IndexEntry{Mode: DirMode, OSS: entry.OSS}
@@ -330,12 +328,12 @@ func (r *Repository) threeWayMerge(label string, head, target, base core.Hash) (
 			fileData = blobData
 		}
 
-		fullPath := filepath.Join(r.Path, name)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			return nil, fmt.Errorf("create directory for %s: %w", name, err)
-		}
-		if err := writeFileFromEntry(fullPath, fileData, entry.Mode); err != nil {
-			// skip M-bM-^@M-^T cannot write on this platform
+		fullPath, err := r.writeWorkTreeFile(name, fileData, entry.Mode)
+		if err != nil {
+			if errors.Is(err, errOutsideWorkTree) {
+				return nil, fmt.Errorf("write %s: %w", name, err)
+			}
+			// skip — cannot write on this platform
 			continue
 		}
 
@@ -450,14 +448,9 @@ func (r *Repository) buildTreeFromEntries(entries map[string]TreeEntry) (core.Ha
 }
 
 func (r *Repository) writeFileFromEntry(name string, entry TreeEntry) error {
-	fullPath := filepath.Join(r.Path, name)
-
 	// Submodule entry: just create the directory
 	if IsSubmoduleMode(entry.Mode) {
-		return os.MkdirAll(fullPath, 0755)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		_, err := r.makeWorkTreeDir(name)
 		return err
 	}
 
@@ -480,5 +473,6 @@ func (r *Repository) writeFileFromEntry(name string, entry TreeEntry) error {
 		fileData = blobData
 	}
 
-	return writeFileFromEntry(fullPath, fileData, entry.Mode)
+	_, err = r.writeWorkTreeFile(name, fileData, entry.Mode)
+	return err
 }

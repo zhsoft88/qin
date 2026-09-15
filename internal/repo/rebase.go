@@ -3,7 +3,6 @@ package repo
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -166,15 +165,10 @@ func (r *Repository) applyCommitChanges(parentTree, commitTree map[string]TreeEn
 		case !inNew:
 			// Deleted in commit — remove from working tree and index
 			delete(idx.Entries, key)
-			os.Remove(filepath.Join(r.Path, cleanPath))
+			r.removeWorkTreeFile(cleanPath)
 
 		case !inOld || oldEntry.Hash != newEntry.Hash || oldEntry.Mode != newEntry.Mode:
 			// Added or modified — write to working tree and update index
-			fullPath := filepath.Join(r.Path, cleanPath)
-			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-				return fmt.Errorf("mkdir %s: %w", cleanPath, err)
-			}
-
 			objType, _, err := r.LoadObject(newEntry.Hash)
 			if err != nil {
 				return fmt.Errorf("load object %s: %w", newEntry.Hash.Short(), err)
@@ -194,7 +188,8 @@ func (r *Repository) applyCommitChanges(parentTree, commitTree map[string]TreeEn
 				fileData = blobData
 			}
 
-			if err := writeFileFromEntry(fullPath, fileData, newEntry.Mode); err != nil {
+			fullPath, err := r.writeWorkTreeFile(cleanPath, fileData, newEntry.Mode)
+			if err != nil {
 				return fmt.Errorf("write %s: %w", cleanPath, err)
 			}
 

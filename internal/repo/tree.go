@@ -87,6 +87,24 @@ func (r *Repository) LoadTree(hash core.Hash) (*Tree, error) {
 	if err := core.DeserializeJSON(content, &tree); err != nil {
 		return nil, fmt.Errorf("deserialize tree: %w", err)
 	}
+
+	// A tree entry name is joined onto the working tree root at every write
+	// site (checkout, reset, merge, rebase, stash, fetch). Trees arrive from
+	// remotes as ordinary objects, so a name like "../../.bashrc" is remote
+	// input that would otherwise be written outside the repository. Validate
+	// here, at the one point every consumer reads trees through, so hostile
+	// data cannot reach a filesystem write at all.
+	//
+	// qin only ever writes trees built from index keys, which are canonical
+	// repo-relative slash paths, so a name failing this check did not come
+	// from qin's own writer — it is a hand-crafted or corrupted object.
+	for i := range tree.Entries {
+		if !safeRepoPath(tree.Entries[i].Name) {
+			return nil, fmt.Errorf("tree %s contains a path outside the repository: %q",
+				hash.Short(), tree.Entries[i].Name)
+		}
+	}
+
 	return &tree, nil
 }
 

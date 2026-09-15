@@ -137,6 +137,13 @@ func (r *Repository) LfsStatus() ([]LfsFile, error) {
 // LfsPull fetches the chunk blobs for a single large file from the remote
 // and replaces the placeholder in the working tree with the real content.
 func (r *Repository) LfsPull(remoteName string, filePath string) error {
+	// The path is joined onto the working tree root below, so it must not
+	// escape. The index lookup that follows already filters to known entries,
+	// but checking the argument directly keeps this function safe on its own.
+	if !safeRepoPath(filePath) {
+		return fmt.Errorf("path outside repository: %s", filePath)
+	}
+
 	idx, err := r.LoadIndex()
 	if err != nil {
 		return err
@@ -202,11 +209,8 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("reconstruct file: %w", err)
 	}
-	fullPath := filepath.Join(r.Path, filePath)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return err
-	}
-	if err := writeFileFromEntry(fullPath, fileData, entry.Mode); err != nil {
+	fullPath, err := r.writeWorkTreeFile(filePath, fileData, entry.Mode)
+	if err != nil {
 		return err
 	}
 

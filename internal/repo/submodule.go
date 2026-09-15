@@ -76,8 +76,21 @@ func SaveLoModules(r *Repository, mods *LoModules) error {
 // in .lomodules, and stages both the .lomodules file and the
 // submodule entry in the index.
 func AddSubmodule(r *Repository, url, path string) error {
+	// The path is untrusted on the clone --recursive and `submodule update
+	// --init` routes, where it is a key read from .lomodules — a tracked file
+	// delivered by the clone. Joined unchecked, "../.." would clone
+	// attacker-chosen content to an arbitrary location outside the working
+	// tree, with no prompt. git likewise refuses submodule paths outside it.
+	//
+	// The slash form is both what gets validated and what is recorded, so the
+	// entry means the same thing on every OS.
+	rel := filepath.ToSlash(path)
+	if !safeRepoPath(rel) {
+		return fmt.Errorf("submodule path outside repository: %s", path)
+	}
+
 	// Clone the submodule repo
-	subPath := filepath.Join(r.Path, path)
+	subPath := filepath.Join(r.Path, rel)
 	sub, err := Clone(url, subPath, false)
 	if err != nil {
 		return fmt.Errorf("clone submodule: %w", err)
@@ -94,7 +107,7 @@ func AddSubmodule(r *Repository, url, path string) error {
 	if err != nil {
 		return err
 	}
-	mods.Submodules[path] = SubmoduleDef{URL: url}
+	mods.Submodules[rel] = SubmoduleDef{URL: url}
 	if err := SaveLoModules(r, mods); err != nil {
 		return err
 	}
@@ -106,7 +119,7 @@ func AddSubmodule(r *Repository, url, path string) error {
 	}
 
 	// Stage submodule entry
-	if err := r.AddSubmodule(path, headStr); err != nil {
+	if err := r.AddSubmodule(rel, headStr); err != nil {
 		return err
 	}
 

@@ -148,6 +148,13 @@ func (r *Repository) ApplyPatch(data []byte) error {
 			cleanPath, osTag := parsePatchPath(encPath)
 			osID := osTag
 
+			// A patch is untrusted input: its paths must not escape the
+			// repository. Refuse outright rather than skipping, so a
+			// malicious patch is reported instead of silently half-applied.
+			if !safeRepoPath(cleanPath) {
+				return fmt.Errorf("refusing patch path outside repository: %s", cleanPath)
+			}
+
 			// Read base64 content until separator
 			var b64Buf strings.Builder
 			for scanner.Scan() {
@@ -168,11 +175,8 @@ func (r *Repository) ApplyPatch(data []byte) error {
 			}
 
 			// Write to working tree
-			fullPath := filepath.Join(r.Path, cleanPath)
-			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-				return fmt.Errorf("create directory for %s: %w", cleanPath, err)
-			}
-			if err := ioutil.WriteFile(fullPath, content, 0644); err != nil {
+			fullPath, err := r.writeWorkTreeFile(cleanPath, content, 0644)
+			if err != nil {
 				return fmt.Errorf("write %s: %w", cleanPath, err)
 			}
 
@@ -211,9 +215,16 @@ func (r *Repository) ApplyPatch(data []byte) error {
 			cleanPath, osTag := parsePatchPath(encPath)
 			osID := osTag
 
-			// Remove from working tree
-			fullPath := filepath.Join(r.Path, cleanPath)
-			os.Remove(fullPath)
+			// Same untrusted-input guard as the add/modify branch: a delete
+			// must not reach outside the repository either.
+			if !safeRepoPath(cleanPath) {
+				return fmt.Errorf("refusing patch path outside repository: %s", cleanPath)
+			}
+
+			// Remove from working tree. Best-effort as before — an already
+			// absent file is not an error — but the helper still refuses a
+			// path that resolves outside the repository.
+			r.removeWorkTreeFile(cleanPath)
 
 			// Remove from index
 			key := entryKey(cleanPath, osID)

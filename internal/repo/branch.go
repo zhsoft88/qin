@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -34,9 +35,11 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 	if err != nil {
 		return fmt.Errorf("list current files: %w", err)
 	}
-	// Remove old files using deduplicated paths (handles OS-tagged composite keys)
+	// Remove old files using deduplicated paths (handles OS-tagged composite keys).
+	// Best-effort, as before: a path that is already gone — or that the helper
+	// refuses as leaving the repository — is left alone rather than aborting.
 	for _, path := range collectPaths(oldFiles) {
-		os.Remove(filepath.Join(r.Path, path))
+		r.removeWorkTreeFile(path)
 	}
 
 	commit, err := r.LoadCommit(hash)
@@ -96,12 +99,9 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 			continue
 		}
 
-		// Write winning entry to disk
-		fullPath := filepath.Join(r.Path, name)
-
 		// Submodule entries: create directory, store in index, skip file content
 		if IsSubmoduleMode(winner.Mode) {
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
+			if _, err := r.makeWorkTreeDir(name); err != nil {
 				return fmt.Errorf("create submodule dir %s: %w", name, err)
 			}
 			for _, e := range group.entries {
@@ -118,7 +118,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 
 		// Empty directory entries have zero hash — create dir and skip
 		if winner.Hash.IsZero() {
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
+			if _, err := r.makeWorkTreeDir(name); err != nil {
 				return fmt.Errorf("create dir %s: %w", name, err)
 			}
 			newIndex.Entries[entryKey(name, winner.OSS)] = IndexEntry{
@@ -126,22 +126,6 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 				OSS:  winner.OSS,
 			}
 			continue
-		}
-
-		// Empty directory entries have zero hash - create dir and skip
-		if winner.Hash.IsZero() {
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
-				return fmt.Errorf("create dir %s: %w", name, err)
-			}
-			newIndex.Entries[entryKey(name, winner.OSS)] = IndexEntry{
-				Mode: DirMode,
-				OSS:  winner.OSS,
-			}
-			continue
-		}
-
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			return fmt.Errorf("create directory for %s: %w", name, err)
 		}
 
 		objType, _, err := r.LoadObject(winner.Hash)
@@ -169,8 +153,16 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 			fileData = blobData
 		}
 
-		if err := writeFileFromEntry(fullPath, fileData, winner.Mode); err != nil {
-			// File cannot be written on this platform — skip entirely
+		fullPath, err := r.writeWorkTreeFile(name, fileData, winner.Mode)
+		if err != nil {
+			if errors.Is(err, errOutsideWorkTree) {
+				// Not a platform quirk: the tree would write outside the
+				// repository. Fail the whole checkout rather than leave the
+				// working tree silently half-restored.
+				return fmt.Errorf("restore %s: %w", name, err)
+			}
+			// Otherwise the entry cannot be written on this platform; skip it,
+			// matching the previous behaviour.
 			continue
 		}
 

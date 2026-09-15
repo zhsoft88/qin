@@ -1,10 +1,13 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/zhsoft88/qin/internal/core"
 )
@@ -17,6 +20,47 @@ func IsSymlinkMode(mode uint32) bool {
 	return mode&uint32(os.ModeSymlink) != 0
 }
 
+// isOutsideRepo reports whether a path produced by filepath.Rel escapes the
+// repository root.
+//
+// filepath.Rel only fails when the two paths cannot be related at all (a
+// relative/absolute mix, or different volumes on Windows); for a sibling or
+// ancestor it succeeds and returns a "../..." path. So callers must inspect
+// the result, not merely the error — a bare `if err != nil` check accepts
+// "../elsewhere/file" and lets the path be joined onto the repo root. This
+// takes the OS-native form Rel produces, before any ToSlash conversion.
+func isOutsideRepo(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// safeRepoPath reports whether a path taken from untrusted input — a patch
+// file, a stored tree — may be joined onto the repository root. Such a path
+// must stay inside the repository: filepath.Join resolves ".." silently, so
+// an unchecked "../../x" writes outside the working tree.
+//
+// The check is deliberately platform-independent rather than delegating to
+// filepath, which interprets only the host OS's separator. Paths are stored
+// in canonical slash form, so a backslash is never valid in one, and on
+// Windows filepath.Join would treat "..\\..\\x" as an escape that Clean — on
+// Linux — sees as a single harmless filename component. Rejecting both forms
+// keeps a given tree meaning the same thing on every OS.
+func safeRepoPath(p string) bool {
+	if p == "" || filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
+		return false
+	}
+	if strings.ContainsRune(p, '\\') {
+		return false
+	}
+	if len(p) >= 2 && p[1] == ':' { // Windows drive-relative, e.g. "C:foo"
+		return false
+	}
+	// path.Clean is the slash-aware counterpart to filepath.Clean, so this
+	// resolves "./..", "a/../../x" and friends identically everywhere. Only a
+	// leading ".." component escapes; a name like "a..b" is untouched.
+	clean := path.Clean(p)
+	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
+}
+
 // writeFileFromEntry writes file data to disk, creating a symlink or regular
 // file depending on the entry's mode.
 func writeFileFromEntry(path string, data []byte, mode uint32) error {
@@ -24,6 +68,109 @@ func writeFileFromEntry(path string, data []byte, mode uint32) error {
 		return os.Symlink(string(data), path)
 	}
 	return ioutil.WriteFile(path, data, os.FileMode(mode))
+}
+
+// errOutsideWorkTree marks a path rejected because operating on it would land
+// outside the repository. Callers that tolerate an unwritable file — entries
+// a platform cannot represent — must not tolerate this one.
+var errOutsideWorkTree = errors.New("path outside repository")
+
+// checkParentsNotSymlinks rejects a target whose existing parent directories
+// below root include a symlink. Path syntax alone cannot rule this out: a
+// tree may legitimately carry a symlink entry, so a later entry named
+// "link/child" is a well-formed repo-relative path that nonetheless resolves
+// through the link — writing the file wherever it points.
+//
+// Only the components below root are examined. Prefixes above it are the
+// user's own environment (a home directory or /tmp that is itself a symlink)
+// and are not this code's business.
+func checkParentsNotSymlinks(root, rel string) error {
+	dir := path.Dir(path.Clean(rel))
+	if dir == "." {
+		return nil
+	}
+	cur := root
+	for _, part := range strings.Split(dir, "/") {
+		cur = filepath.Join(cur, part)
+		fi, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			// Not created yet: MkdirAll will make it a real directory.
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: refusing to write through symlink: %s", errOutsideWorkTree, rel)
+		}
+	}
+	return nil
+}
+
+// writeWorkTreeFile writes content to a repo-relative path in the working
+// tree, creating parent directories as needed.
+//
+// Every write of tree content goes through here. Safe paths alone are not
+// enough: the path must also not traverse a symlink out of the repository,
+// which is why the check is repeated at write time rather than trusted to
+// validation of the tree it came from.
+func (r *Repository) writeWorkTreeFile(rel string, data []byte, mode uint32) (string, error) {
+	if !safeRepoPath(rel) {
+		return "", fmt.Errorf("%w: %s", errOutsideWorkTree, rel)
+	}
+	if err := checkParentsNotSymlinks(r.Path, rel); err != nil {
+		return "", err
+	}
+	fullPath := filepath.Join(r.Path, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return "", fmt.Errorf("create directory for %s: %w", rel, err)
+	}
+	// The parent check cannot see the final component. A symlink there would
+	// be followed by the write, putting the content wherever it points — so
+	// drop it first and let the entry replace it outright, as git does.
+	if fi, err := os.Lstat(fullPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(fullPath); err != nil {
+			// Refusing rather than writing anyway: the symlink is still there
+			// and the write would follow it.
+			return "", fmt.Errorf("%w: cannot replace symlink at %s: %v",
+				errOutsideWorkTree, rel, err)
+		}
+	}
+	if err := writeFileFromEntry(fullPath, data, mode); err != nil {
+		return "", fmt.Errorf("write %s: %w", rel, err)
+	}
+	return fullPath, nil
+}
+
+// makeWorkTreeDir creates a repo-relative directory in the working tree
+// (submodule and empty-directory entries), with the same checks as
+// writeWorkTreeFile — a directory created through a symlinked parent lands
+// outside the repository just as a file does.
+func (r *Repository) makeWorkTreeDir(rel string) (string, error) {
+	if !safeRepoPath(rel) {
+		return "", fmt.Errorf("%w: %s", errOutsideWorkTree, rel)
+	}
+	if err := checkParentsNotSymlinks(r.Path, rel); err != nil {
+		return "", err
+	}
+	fullPath := filepath.Join(r.Path, filepath.FromSlash(rel))
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
+		return "", fmt.Errorf("create directory %s: %w", rel, err)
+	}
+	return fullPath, nil
+}
+
+// removeWorkTreeFile removes a repo-relative path from the working tree,
+// applying the same symlink check as writeWorkTreeFile so a tree cannot
+// delete content outside the repository either.
+func (r *Repository) removeWorkTreeFile(rel string) error {
+	if !safeRepoPath(rel) {
+		return fmt.Errorf("%w: %s", errOutsideWorkTree, rel)
+	}
+	if err := checkParentsNotSymlinks(r.Path, rel); err != nil {
+		return err
+	}
+	return os.Remove(filepath.Join(r.Path, filepath.FromSlash(rel)))
 }
 
 // IndexEntry represents a staged file.
@@ -155,6 +302,9 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 	relPath, err := filepath.Rel(r.Path, absPath)
 	if err != nil {
 		return false, fmt.Errorf("path outside repository: %w", err)
+	}
+	if isOutsideRepo(relPath) {
+		return false, fmt.Errorf("path outside repository: %s", filePath)
 	}
 
 	fi, err := os.Lstat(absPath)
@@ -317,6 +467,9 @@ func (r *Repository) RemoveFile(filePath string) error {
 	if err != nil {
 		return fmt.Errorf("path outside repository: %w", err)
 	}
+	if isOutsideRepo(relPath) {
+		return fmt.Errorf("path outside repository: %s", filePath)
+	}
 
 	idx, err := r.LoadIndex()
 	if err != nil {
@@ -351,6 +504,9 @@ func (r *Repository) RemoveFileOS(filePath, osTag string) error {
 	if err != nil {
 		return fmt.Errorf("path outside repository: %w", err)
 	}
+	if isOutsideRepo(relPath) {
+		return fmt.Errorf("path outside repository: %s", filePath)
+	}
 
 	idx, err := r.LoadIndex()
 	if err != nil {
@@ -379,6 +535,12 @@ func (r *Repository) RemoveFileOS(filePath, osTag string) error {
 // AddSubmodule records a submodule entry in the index with SubmoduleMode.
 // The hashHex is the pinned commit hash of the submodule repository.
 func (r *Repository) AddSubmodule(path, hashHex string) error {
+	// Index keys are later committed into trees and joined onto the working
+	// tree root, so a path that escapes must not get in here either.
+	if !safeRepoPath(path) {
+		return fmt.Errorf("submodule path outside repository: %s", path)
+	}
+
 	h, err := core.HashFromHex(hashHex)
 	if err != nil {
 		return fmt.Errorf("invalid hash: %w", err)

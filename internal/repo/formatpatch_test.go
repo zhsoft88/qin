@@ -298,3 +298,66 @@ func TestParsePatchFileRoundTrip(t *testing.T) {
 		t.Fatal("expected error for missing --- separator")
 	}
 }
+
+// TestApplyPatchOutsideRepo covers a patch as untrusted input. Its paths are
+// joined straight onto the repository root, so without a guard a patch whose
+// path is "../x" writes outside the working tree entirely.
+func TestApplyPatchOutsideRepo(t *testing.T) {
+	base, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(base)
+
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Init(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	victim := filepath.Join(base, "victim.txt")
+	const original = "ORIGINAL SAFE CONTENT"
+	if err := ioutil.WriteFile(victim, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// "PWNED\n" — the body is base64, as RenderPatch emits it.
+	const body = "~ 6 ../victim.txt  (0000000000000000 -> 1111111111111111)\nUFdORUQK\n====\n"
+	p := &PatchFile{
+		Author:  "attacker <a@evil>",
+		Date:    time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
+		Message: "innocuous",
+		Body:    body,
+	}
+
+	// Go through ApplyPatchFile, the entry point `am` uses — it hands the
+	// parsed Body to ApplyPatch, which is the text carrying the paths.
+	if err := r.ApplyPatchFile([]byte(p.Render())); err == nil {
+		t.Fatal("expected a patch path outside the repo to be refused")
+	}
+
+	got, err := ioutil.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("file outside the repo was overwritten: got %q", got)
+	}
+
+	// A delete line must be refused the same way.
+	del := &PatchFile{
+		Author:  "attacker <a@evil>",
+		Date:    time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC),
+		Message: "innocuous",
+		Body:    "- 6 ../victim.txt\n",
+	}
+	if err := r.ApplyPatchFile([]byte(del.Render())); err == nil {
+		t.Fatal("expected a patch delete outside the repo to be refused")
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("file outside the repo was removed: %v", err)
+	}
+}

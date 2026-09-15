@@ -149,16 +149,12 @@ func (r *Repository) StashPop() error {
 			continue
 		}
 
-		// Write winning entry to disk
-		fullPath := filepath.Join(r.Path, name)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-			return fmt.Errorf("create directory for %s: %w", name, err)
-		}
-
 		// Empty directory entries have zero hash - create dir, skip file write
 		var fileData []byte
+		var fullPath string
 		if winner.Hash.IsZero() {
-			if err := os.MkdirAll(fullPath, 0755); err != nil {
+			var err error
+			if fullPath, err = r.makeWorkTreeDir(name); err != nil {
 				return fmt.Errorf("create dir %s: %w", name, err)
 			}
 		} else {
@@ -180,7 +176,7 @@ func (r *Repository) StashPop() error {
 				fileData = blobData
 			}
 
-			if err := writeFileFromEntry(fullPath, fileData, winner.Mode); err != nil {
+			if fullPath, err = r.writeWorkTreeFile(name, fileData, winner.Mode); err != nil {
 				return fmt.Errorf("write %s: %w", name, err)
 			}
 		}

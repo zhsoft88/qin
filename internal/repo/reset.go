@@ -2,8 +2,6 @@ package repo
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/zhsoft88/qin/internal/core"
 )
@@ -63,7 +61,7 @@ func (r *Repository) ResetCommit(hash core.Hash, mode string) error {
 	if mode == "hard" {
 		// Remove all files currently on disk
 		for _, path := range oldPaths {
-			os.Remove(filepath.Join(r.Path, path))
+			r.removeWorkTreeFile(path)
 		}
 
 		// Write new files with OS filtering (like restoreCommit)
@@ -120,19 +118,10 @@ func (r *Repository) buildIndexFromTreeEntries(entries map[string]TreeEntry) err
 
 // writeTreeEntryToDisk writes a single tree entry to the working tree.
 func (r *Repository) writeTreeEntryToDisk(name string, entry TreeEntry) error {
-	fullPath := filepath.Join(r.Path, name)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return fmt.Errorf("create directory for %s: %w", name, err)
-	}
-
 	// Empty directory entries have zero hash — create dir and skip
 	if entry.Hash.IsZero() {
-		return os.MkdirAll(fullPath, 0755)
-	}
-
-	// Empty directory entries have zero hash - create dir and skip
-	if entry.Hash.IsZero() {
-		return os.MkdirAll(fullPath, 0755)
+		_, err := r.makeWorkTreeDir(name)
+		return err
 	}
 
 	objType, _, err := r.LoadObject(entry.Hash)
@@ -158,7 +147,8 @@ func (r *Repository) writeTreeEntryToDisk(name string, entry TreeEntry) error {
 		fileData = blobData
 	}
 
-	return writeFileFromEntry(fullPath, fileData, entry.Mode)
+	_, err = r.writeWorkTreeFile(name, fileData, entry.Mode)
+	return err
 }
 
 // collectPathsFromTree deduplicates clean paths from tree entries (composite keys).

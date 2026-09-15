@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 func TestBuildTreeFromIndex(t *testing.T) {
@@ -233,5 +235,308 @@ func TestWriteCommitNothingStaged(t *testing.T) {
 
 	if _, err := repo.WriteCommit("Author", "empty"); err == nil {
 		t.Fatal("expected error when nothing staged")
+	}
+}
+
+// TestHostileTreeCannotEscapeRepo pins the guard in LoadTree. A tree arrives
+// from a remote as an ordinary object, and every consumer joins its entry
+// names onto the working tree root, so a name with "../" is remote input that
+// would otherwise be written outside the repository.
+func TestHostileTreeCannotEscapeRepo(t *testing.T) {
+	for _, name := range []string{
+		"../victim.txt",
+		"../../victim.txt",
+		"a/../../victim.txt",
+		`..\..\victim.txt`,
+		"/tmp/victim.txt",
+		"C:victim.txt",
+		"..",
+	} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			base, err := ioutil.TempDir("", "lo-test-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(base)
+
+			repoDir := filepath.Join(base, "repo")
+			if err := os.MkdirAll(repoDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			r, err := Init(repoDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			victim := filepath.Join(base, "victim.txt")
+			const original = "ORIGINAL"
+			if err := ioutil.WriteFile(victim, []byte(original), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			// Hand-craft the tree a hostile remote could serve.
+			payload := []byte("PWNED")
+			blob, err := r.StoreObject(core.ObjectBlob, payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tree := &Tree{Entries: []TreeEntry{
+				{Name: name, Hash: blob, Size: int64(len(payload)), Mode: 0644},
+			}}
+			treeContent, err := core.SerializeJSON(tree)
+			if err != nil {
+				t.Fatal(err)
+			}
+			treeHash, err := r.StoreObject(core.ObjectTree, treeContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			commit := &Commit{Tree: treeHash, Author: "attacker", Message: "hostile"}
+			commitContent, err := core.SerializeJSON(commit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			commitHash, err := r.StoreObject(core.ObjectCommit, commitContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := r.WriteRef("refs/heads/main", commitHash.String()); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.SetHEAD("ref: refs/heads/main"); err != nil {
+				t.Fatal(err)
+			}
+
+			// Checkout must refuse rather than write.
+			if err := r.SwitchBranch("main"); err == nil {
+				t.Fatal("expected checkout to reject a tree path outside the repo")
+			}
+			got, err := ioutil.ReadFile(victim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != original {
+				t.Fatalf("file outside the repo was overwritten: got %q", got)
+			}
+		})
+	}
+}
+
+// TestTreePathThroughSymlinkedParentCannotEscapeRepo is the regression test
+// for a tree entry that is a well-formed repository-relative path but resolves
+// through a symlink to a directory outside the repository.
+//
+// Path validation alone cannot catch this: "link/pwned.txt" contains no "..",
+// so safeRepoPath accepts it, and the tree is loaded and walked normally. Only
+// the check at write time — where the existing working tree is visible — can
+// see that "link" is a symlink pointing elsewhere.
+func TestTreePathThroughSymlinkedParentCannotEscapeRepo(t *testing.T) {
+	base, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(base)
+
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Init(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(outside, 0755); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "pwned.txt")
+	const original = "ORIGINAL"
+	if err := ioutil.WriteFile(victim, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The symlink is already in the working tree — it was checked out earlier,
+	// or created by the user. The tree below only has to name a path through
+	// it, which is all a hostile remote can do.
+	if err := os.Symlink(outside, filepath.Join(repoDir, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	hostileCommit(t, r, []hostileEntry{
+		{name: "link/pwned.txt", mode: 0644, content: "PWNED"},
+	})
+
+	if err := r.SwitchBranch("main"); err == nil {
+		t.Fatal("expected checkout to reject a write through a symlinked parent")
+	}
+	got, err := ioutil.ReadFile(victim)
+	if err != nil {
+		t.Fatalf("file outside the repo disappeared: %v", err)
+	}
+	if string(got) != original {
+		t.Fatalf("escaped: outside file is now %q, want %q", got, original)
+	}
+}
+
+// TestSymlinkAndPathThroughItCannotEscapeRepo covers the same escape with the
+// symlink supplied by the tree itself rather than the working tree.
+//
+// Map iteration order is unspecified, so the checkout may either create "link"
+// first — after which "link/pwned.txt" is rejected and the checkout fails — or
+// see "link/pwned.txt" first and make "link" an ordinary directory, after which
+// the symlink entry cannot be written and is skipped. Both outcomes are
+// acceptable; what must never happen is the write landing outside the repo.
+func TestSymlinkAndPathThroughItCannotEscapeRepo(t *testing.T) {
+	base, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(base)
+
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Init(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(outside, 0755); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "pwned.txt")
+	const original = "ORIGINAL"
+	if err := ioutil.WriteFile(victim, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	hostileCommit(t, r, []hostileEntry{
+		{name: "link", mode: SymlinkMode, content: outside},
+		{name: "link/pwned.txt", mode: 0644, content: "PWNED"},
+	})
+
+	// The error is allowed to be nil here — see the comment above.
+	r.SwitchBranch("main")
+
+	got, err := ioutil.ReadFile(victim)
+	if err != nil {
+		t.Fatalf("file outside the repo disappeared: %v", err)
+	}
+	if string(got) != original {
+		t.Fatalf("escaped: outside file is now %q, want %q", got, original)
+	}
+}
+
+// hostileEntry is a tree entry named by its content, for hostileCommit.
+type hostileEntry struct {
+	name    string
+	mode    uint32
+	content string
+}
+
+// hostileCommit stores each entry's content as a blob, builds a tree from
+// them, and points refs/heads/main at a commit for it — the shape a hostile
+// remote would serve.
+func hostileCommit(t *testing.T, r *Repository, entries []hostileEntry) {
+	t.Helper()
+	tree := &Tree{Entries: make([]TreeEntry, 0, len(entries))}
+	for _, e := range entries {
+		blob, err := r.StoreObject(core.ObjectBlob, []byte(e.content))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tree.Entries = append(tree.Entries, TreeEntry{
+			Name: e.name,
+			Hash: blob,
+			Size: int64(len(e.content)),
+			Mode: e.mode,
+		})
+	}
+
+	treeContent, err := core.SerializeJSON(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeHash, err := r.StoreObject(core.ObjectTree, treeContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := &Commit{Tree: treeHash, Author: "attacker", Message: "hostile"}
+	commitContent, err := core.SerializeJSON(commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := r.StoreObject(core.ObjectCommit, commitContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteRef("refs/heads/main", commitHash.String()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetHEAD("ref: refs/heads/main"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTreeEntryReplacingSymlinkCannotEscapeRepo is the end-to-end form of the
+// final-component case: the tree names a regular file at a path where the
+// working tree already holds a symlink.
+//
+// The entry's name is an ordinary one-component path, so nothing about it
+// looks hostile — the escape depends entirely on what is already on disk.
+func TestTreeEntryReplacingSymlinkCannotEscapeRepo(t *testing.T) {
+	base, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(base)
+
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Init(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(outside, 0755); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(outside, "victim.txt")
+	const original = "ORIGINAL"
+	if err := ioutil.WriteFile(victim, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(repoDir, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	hostileCommit(t, r, []hostileEntry{
+		{name: "link", mode: 0644, content: "PWNED"},
+	})
+
+	if err := r.SwitchBranch("main"); err != nil {
+		t.Fatalf("switch failed: %v", err)
+	}
+
+	got, err := ioutil.ReadFile(victim)
+	if err != nil {
+		t.Fatalf("file outside the repo disappeared: %v", err)
+	}
+	if string(got) != original {
+		t.Fatalf("escaped: outside file is now %q, want %q", got, original)
+	}
+	content, err := ioutil.ReadFile(filepath.Join(repoDir, "link"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "PWNED" {
+		t.Fatalf("entry not written: got %q, want %q", content, "PWNED")
 	}
 }
