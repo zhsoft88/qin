@@ -688,18 +688,25 @@ func TestLazyCloneWithOS(t *testing.T) {
 		t.Fatalf("expected 'hello', got %q", data)
 	}
 
+	// f.txt is registered for linux and win only. The variant matching the host
+	// is checked out; on a host with no matching variant the path is invisible
+	// and nothing is written — the same rule TestStatusVisibleOnly pins for
+	// status, here applied to checkout. A host missing from want is one of
+	// those, and its assertion is the absence, not a content.
 	data, err = ioutil.ReadFile(filepath.Join(cloneDir, "f.txt"))
-	if err != nil {
-		t.Fatal(err)
+	want := map[uint8]string{
+		OSID("linux"): "linux data",
+		OSID("win"):   "windows data",
 	}
-
-	// The content should match current OS
-	expectedContent := "linux data"
-	if currentOS() == OSID("win") {
-		expectedContent = "windows data"
-	}
-	if string(data) != expectedContent {
-		t.Fatalf("expected %q for current OS, got %q", expectedContent, data)
+	if expected, ok := want[currentOS()]; ok {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != expected {
+			t.Fatalf("expected %q for current OS, got %q", expected, data)
+		}
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("no f.txt variant matches this OS, so nothing should be checked out, but reading it returned %v", err)
 	}
 
 	// Index should have all OS variants
