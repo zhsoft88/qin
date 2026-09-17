@@ -13,6 +13,14 @@ import (
 // Version is the current application version.
 const Version = "0.1.0"
 
+// Name is what the program calls itself in usage text, error messages and
+// --version. It is the single definition: the CLI reads it rather than spelling
+// the name out, so a rename cannot leave the banner and the messages disagreeing.
+// The legacy name "lo" survives only where it is data rather than display — the
+// "lo-lfs" placeholder written into lazily cloned files, which is a format value
+// and not a label.
+const Name = "qin"
+
 type ObjectType uint8
 
 const (

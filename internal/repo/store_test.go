@@ -48,7 +48,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		t.Fatal("expected HasObject to be true")
 	}
 
-	// Verify file layout: .lo/objects/XX/YYYYYY
+	// Verify file layout: .qin/objects/XX/YYYYYY
 	objPath := filepath.Join(repo.ObjectsDir(), h.String()[:2], h.String()[2:])
 	if _, err := os.Stat(objPath); err != nil {
 		t.Fatalf("object file not found at %s: %v", objPath, err)

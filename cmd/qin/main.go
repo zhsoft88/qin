@@ -35,7 +35,7 @@ type command struct {
 
 func main() {
 	if len(os.Args) == 2 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
-		fmt.Println("lo version " + core.Version)
+		fmt.Println(core.Name + " version " + core.Version)
 		return
 	}
 	if len(os.Args) < 2 {
@@ -95,7 +95,7 @@ func main() {
 	}
 }
 func usage() {
-	fmt.Println(`Usage: lo <command> [options]
+	fmt.Println("Usage: " + core.Name + ` <command> [options]
 Commands:
   init [<path>]     Initialize a new repository (default: current dir)
   add <file>        Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
@@ -173,7 +173,7 @@ func runAdd(args []string) error {
 	args = reorderFlags(args)
 	fs.Parse(args)
 	if fs.NArg() == 0 {
-		return fmt.Errorf("usage: lo add [--os] [--os-match <expr>] [--exclude <glob>] <file> [file...]")
+		return fmt.Errorf("usage: " + core.Name + " add [--os] [--os-match <expr>] [--exclude <glob>] <file> [file...]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -642,7 +642,7 @@ func runRm(args []string) error {
 		}
 	}
 	if len(files) == 0 {
-		return fmt.Errorf("usage: lo rm [--cached] [-r] <file> [file...]")
+		return fmt.Errorf("usage: " + core.Name + " rm [--cached] [-r] <file> [file...]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -896,7 +896,7 @@ func runStatus(args []string) error {
 // ---- cat ----
 func runCat(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo cat <hash>")
+		return fmt.Errorf("usage: " + core.Name + " cat <hash>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -986,7 +986,7 @@ func runLs(args []string) error {
 // ---- checkout ----
 func runCheckout(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo checkout <ref>")
+		return fmt.Errorf("usage: " + core.Name + " checkout <ref>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1025,7 +1025,7 @@ func runBranch(args []string) error {
 	}
 	if args[0] == "-d" {
 		if len(args) < 2 {
-			return fmt.Errorf("usage: lo branch -d <name>")
+			return fmt.Errorf("usage: " + core.Name + " branch -d <name>")
 		}
 		if err := r.DeleteBranch(args[1]); err != nil {
 			return err
@@ -1043,7 +1043,7 @@ func runBranch(args []string) error {
 // ---- switch ----
 func runSwitch(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo switch <branch>")
+		return fmt.Errorf("usage: " + core.Name + " switch <branch>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1155,7 +1155,7 @@ func runDiff(args []string) error {
 				return err
 			}
 		default:
-			return fmt.Errorf("usage: lo diff [--cached] [--patch] [<ref> <ref>]")
+			return fmt.Errorf("usage: " + core.Name + " diff [--cached] [--patch] [<ref> <ref>]")
 		}
 	}
 	if patchMode {
@@ -1173,7 +1173,7 @@ func runDiff(args []string) error {
 // ---- merge ----
 func runMerge(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo merge <branch>")
+		return fmt.Errorf("usage: " + core.Name + " merge <branch>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1205,7 +1205,7 @@ func runMerge(args []string) error {
 // ---- rebase ----
 func runRebase(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo rebase <branch>")
+		return fmt.Errorf("usage: " + core.Name + " rebase <branch>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1221,7 +1221,7 @@ func runRebase(args []string) error {
 // ---- cherry-pick ----
 func runCherryPick(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo cherry-pick <ref>")
+		return fmt.Errorf("usage: " + core.Name + " cherry-pick <ref>")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1295,7 +1295,7 @@ func runRemote(args []string) error {
 	switch args[0] {
 	case "add":
 		if len(args) < 3 {
-			return fmt.Errorf("usage: lo remote add <name> <path>")
+			return fmt.Errorf("usage: " + core.Name + " remote add <name> <path>")
 		}
 		if err := r.SaveRemote(args[1], args[2]); err != nil {
 			return err
@@ -1303,7 +1303,7 @@ func runRemote(args []string) error {
 		fmt.Printf("added remote: %s -> %s\n", args[1], args[2])
 	case "remove":
 		if len(args) < 2 {
-			return fmt.Errorf("usage: lo remote remove <name>")
+			return fmt.Errorf("usage: " + core.Name + " remote remove <name>")
 		}
 		if err := r.RemoveRemote(args[1]); err != nil {
 			return err
@@ -1401,7 +1401,7 @@ func runClone(args []string) error {
 		}
 	}
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: lo clone [--lazy] <url> <dir>")
+		return fmt.Errorf("usage: " + core.Name + " clone [--lazy] <url> <dir>")
 	}
 	r, err := repo.Clone(rest[0], rest[1], lazy)
 	if err != nil {
@@ -1422,7 +1422,7 @@ func runClone(args []string) error {
 // ---- lfs ----
 func runLfs(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo lfs status|pull [<file>]")
+		return fmt.Errorf("usage: " + core.Name + " lfs status|pull [<file>]")
 	}
 	switch args[0] {
 	case "status":
@@ -1467,7 +1467,7 @@ func runLfsStatus(args []string) error {
 // ---- lfs pull ----
 func runLfsPull(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo lfs pull [--all | <file>]")
+		return fmt.Errorf("usage: " + core.Name + " lfs pull [--all | <file>]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -1513,7 +1513,7 @@ func runLfsPull(args []string) error {
 // ---- show ----
 func runShow(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo show [--os <os>] <file>")
+		return fmt.Errorf("usage: " + core.Name + " show [--os <os>] <file>")
 	}
 	osName := ""
 	filePath := ""
@@ -1526,7 +1526,7 @@ func runShow(args []string) error {
 		}
 	}
 	if filePath == "" {
-		return fmt.Errorf("usage: lo show [--os <os>] <file>")
+		return fmt.Errorf("usage: " + core.Name + " show [--os <os>] <file>")
 	}
 
 	// Default to current OS
@@ -1644,7 +1644,7 @@ func runConfig(args []string) error {
 
 	if len(args) > 0 && args[0] == "--unset" {
 		if len(args) != 2 {
-			return fmt.Errorf("usage: lo config --unset <key>")
+			return fmt.Errorf("usage: " + core.Name + " config --unset <key>")
 		}
 		if err := repo.ConfigUnset(cfg, args[1]); err != nil {
 			return err
@@ -1692,13 +1692,13 @@ func runConfig(args []string) error {
 		return nil
 
 	default:
-		return fmt.Errorf("usage: lo config [<key> [<value>]]")
+		return fmt.Errorf("usage: " + core.Name + " config [<key> [<value>]]")
 	}
 }
 
 // ---- fsmonitor--daemon ----
 //
-// The change monitor is built into lo: a background process watches the
+// The change monitor is built into qin: a background process watches the
 // working tree through the native API of whatever platform this is, and status
 // reads the changes it records instead of stat-ing every tracked file. These
 // verbs manage that process's lifecycle.
@@ -1747,7 +1747,7 @@ func runFsmonitorDaemon(args []string) error {
 	switch sub {
 	case "start":
 		if !r.FsmonitorEnabled() {
-			return fmt.Errorf("core.fsmonitor is off (enable with: lo config core.fsmonitor true)")
+			return fmt.Errorf("core.fsmonitor is off (enable with: %s config core.fsmonitor true)", core.Name)
 		}
 		if err := r.FsmonitorDaemonStart(); err != nil {
 			if err == repo.ErrDaemonBusy {
@@ -1768,7 +1768,7 @@ func runFsmonitorDaemon(args []string) error {
 	case "status":
 		return printFsmonitorStatus(r)
 	case "":
-		return fmt.Errorf("usage: lo fsmonitor--daemon start|run|stop|status")
+		return fmt.Errorf("usage: " + core.Name + " fsmonitor--daemon start|run|stop|status")
 	default:
 		return fmt.Errorf("unknown fsmonitor--daemon subcommand: %s (use start, run, stop, status)", sub)
 	}
@@ -1920,7 +1920,7 @@ func runReset(args []string) error {
 			mode = "hard"
 		default:
 			if target != "" {
-				return fmt.Errorf("usage: lo reset [--soft | --mixed | --hard] [<commit>]")
+				return fmt.Errorf("usage: " + core.Name + " reset [--soft | --mixed | --hard] [<commit>]")
 			}
 			target = a
 		}
@@ -1965,7 +1965,7 @@ func runRestore(args []string) error {
 	}
 
 	if len(files) == 0 {
-		return fmt.Errorf("usage: lo restore [--staged] <file> [file...]")
+		return fmt.Errorf("usage: " + core.Name + " restore [--staged] <file> [file...]")
 	}
 
 	r, err := findRepo()
@@ -2027,7 +2027,7 @@ func runFormatPatch(args []string) error {
 	if len(args) >= 3 && args[0] == "-N" {
 		n, err := strconv.Atoi(args[1])
 		if err != nil || n <= 0 {
-			return fmt.Errorf("usage: lo format-patch -N <n> <head>")
+			return fmt.Errorf("usage: " + core.Name + " format-patch -N <n> <head>")
 		}
 		head, err = r.ResolveRef(args[2])
 		if err != nil {
@@ -2049,7 +2049,7 @@ func runFormatPatch(args []string) error {
 	} else if len(args) == 1 {
 		parts := strings.SplitN(args[0], "..", 2)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return fmt.Errorf("usage: lo format-patch <base>..<head> | -N <n> <head>")
+			return fmt.Errorf("usage: " + core.Name + " format-patch <base>..<head> | -N <n> <head>")
 		}
 		base, err = r.ResolveRef(parts[0])
 		if err != nil {
@@ -2060,7 +2060,7 @@ func runFormatPatch(args []string) error {
 			return fmt.Errorf("resolve head: %w", err)
 		}
 	} else {
-		return fmt.Errorf("usage: lo format-patch <base>..<head> | -N <n> <head>")
+		return fmt.Errorf("usage: " + core.Name + " format-patch <base>..<head> | -N <n> <head>")
 	}
 
 	files, err := r.FormatPatch(base, head)
@@ -2095,12 +2095,12 @@ func runAm(args []string) error {
 }
 func runSubmodule(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: lo submodule add|update|status ...")
+		return fmt.Errorf("usage: " + core.Name + " submodule add|update|status ...")
 	}
 	switch args[0] {
 	case "add":
 		if len(args) < 3 {
-			return fmt.Errorf("usage: lo submodule add url path")
+			return fmt.Errorf("usage: " + core.Name + " submodule add url path")
 		}
 		r, err := findRepo()
 		if err != nil {
@@ -2234,12 +2234,12 @@ func runLostFound(args []string) error {
 		fmt.Printf("\n      %s\n\n", c.Message)
 	}
 	fmt.Println("---")
-	fmt.Println("To recover: use lo checkout <hash> then lo branch <name>")
+	fmt.Println("To recover: use " + core.Name + " checkout <hash> then " + core.Name + " branch <name>")
 	return nil
 }
 
 func runVersion(args []string) error {
-	fmt.Println("lo version " + core.Version)
+	fmt.Println(core.Name + " version " + core.Version)
 	return nil
 }
 

@@ -106,4 +106,13 @@ The invariant every other decision serves: **the monitor may only remove work, n
 
 ### Legacy Naming
 
-The project was originally named "lo" — the binary displays `lo` in usage text and error messages. Legacy names (`lo`, `lo-lfs`, `.lo`) appear in comments, error strings, and internal references. The config type is `Config`, not `LoConfig`.
+The project was originally named "lo" and now calls itself `qin` everywhere it
+names itself: the usage banner, every `usage: ...` error, and `--version` all
+read `core.Name`, which is the single definition of the name. Do not spell it
+out at a call site — a hardcoded name is how the banner and the messages drifted
+apart the first time.
+
+The legacy name survives only where it is **data rather than display**: the
+`"lo-lfs"` placeholder written into files by a lazy clone and compared against
+on load is a format value, and renaming it would make existing clones stop
+recognising their own placeholders. The config type is `Config`, not `LoConfig`.
