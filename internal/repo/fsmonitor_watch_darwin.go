@@ -88,14 +88,14 @@ func (w *fseventsWatcher) Events() <-chan []watchEvent {
 
 // fseventsABI checks the transcribed flag values against CoreServices'.
 func fseventsABI() error {
-	ours := make([]C.uint32_t, len(fsEventFlags))
+	// C.uint, not C.uint32_t: cgo converts nothing at a typed-pointer argument,
+	// so the slice has to be the parameter's own type — and C.uint is the
+	// `unsigned int` the header declares, which is the side that cannot drift.
+	ours := make([]C.uint, len(fsEventFlags))
 	for i, f := range fsEventFlags {
-		ours[i] = C.uint32_t(f)
+		ours[i] = C.uint(f)
 	}
-	// unsafe.Pointer rather than &ours[0]: cgo is strict about pointer types,
-	// and the C parameter's `unsigned int *` need not be the same Go type as
-	// C.uint32_t.
-	bad := C.qin_fsevents_abi_check(unsafe.Pointer(&ours[0]), C.size_t(len(ours)))
+	bad := C.qin_fsevents_abi_check(&ours[0], C.size_t(len(ours)))
 	if bad != nil {
 		return fmt.Errorf("fsmonitor: FSEvents flag %s does not match this system's CoreServices", C.GoString(bad))
 	}
