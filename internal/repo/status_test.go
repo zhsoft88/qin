@@ -4,6 +4,8 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -747,4 +749,245 @@ func TestStatusStagedOSVariants(t *testing.T) {
 	if len(s.Staged) != 1 {
 		t.Fatalf("expected 1 staged, got %v", s.Staged)
 	}
+}
+
+// ---- staged deletions ----
+
+// TestStatusStagedDeletion covers the blind spot: a path HEAD has that is in
+// neither the index nor the working tree. Before StagedDeleted existed, every
+// list below was empty and status said the tree was clean.
+func TestStatusStagedDeletion(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFile(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.WriteCommit("Test", "a"); err != nil {
+		t.Fatal(err)
+	}
+
+	// What `qin rm` does: drop the index entry, then delete the file.
+	if err := r.RemoveFile(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := r.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.StagedDeleted) != 1 || s.StagedDeleted[0] != "a.txt" {
+		t.Fatalf("StagedDeleted = %v, want [a.txt]", s.StagedDeleted)
+	}
+	// This is the defect itself, written down: nothing else can see the path,
+	// which is why the status read as clean.
+	if len(s.Staged) != 0 {
+		t.Fatalf("Staged = %v, want empty", s.Staged)
+	}
+	if len(s.Modified) != 0 {
+		t.Fatalf("Modified = %v, want empty", s.Modified)
+	}
+	if len(s.Deleted) != 0 {
+		t.Fatalf("Deleted = %v, want empty", s.Deleted)
+	}
+	if len(s.Untracked) != 0 {
+		t.Fatalf("Untracked = %v, want empty", s.Untracked)
+	}
+}
+
+// TestStatusStagedDeletionCached is the `rm --cached` shape: the file stays on
+// disk, so the same path is simultaneously a staged deletion and untracked —
+// the same pair git reports.
+func TestStatusStagedDeletionCached(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFile(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.WriteCommit("Test", "a"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.RemoveFile(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := r.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.StagedDeleted) != 1 || s.StagedDeleted[0] != "a.txt" {
+		t.Fatalf("StagedDeleted = %v, want [a.txt]", s.StagedDeleted)
+	}
+	if len(s.Untracked) != 1 || s.Untracked[0] != "a.txt" {
+		t.Fatalf("Untracked = %v, want [a.txt]", s.Untracked)
+	}
+	if len(s.Deleted) != 0 {
+		t.Fatalf("Deleted = %v, want empty: the file is still on disk", s.Deleted)
+	}
+}
+
+// TestStatusStagedDeletionMatchesDiffIndex pins status and diff --cached to the
+// same answer. They enumerate different structures — diff compares two trees,
+// status compares the HEAD tree against the index — so an equality test is the
+// only thing that keeps them from drifting apart again.
+func TestStatusStagedDeletionMatchesDiffIndex(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"keep.txt", "gone1.txt", "gone2.txt"} {
+		if err := ioutil.WriteFile(filepath.Join(dir, name), []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.AddFile(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := r.WriteCommit("Test", "base"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"gone1.txt", "gone2.txt"} {
+		if err := r.RemoveFile(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A staged add is the mirror image and must not be mistaken for one.
+	if err := ioutil.WriteFile(filepath.Join(dir, "new.txt"), []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFile(filepath.Join(dir, "new.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := r.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, err := r.DiffIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fromDiff []string
+	for _, f := range diff.Files {
+		if f.Type == DiffDeleted {
+			fromDiff = append(fromDiff, f.Name)
+		}
+	}
+	sort.Strings(fromDiff)
+
+	if !reflect.DeepEqual(s.StagedDeleted, fromDiff) {
+		t.Fatalf("status says %v, diff --cached says %v", s.StagedDeleted, fromDiff)
+	}
+	if len(fromDiff) != 2 {
+		t.Fatalf("fixture is wrong: diff --cached reports %v", fromDiff)
+	}
+}
+
+// TestStatusStagedDeletionOSFiltered: a path is tracked if the index tracks it,
+// whatever variant each side holds. HEAD's default variant against an
+// index entry for the current OS only is the same path, not a deletion — a
+// composite-key comparison would call it one.
+func TestStatusStagedDeletionOSFiltered(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := func() {
+		t.Helper()
+		if err := ioutil.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.AddFile(filepath.Join(dir, "a.txt")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.WriteCommit("Test", "a"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commit()
+
+	names := OSNames(currentOS())
+	if len(names) == 0 {
+		t.Skip("no OS name for this platform")
+	}
+	// HEAD's entry is the default variant; the index now holds the same path
+	// as a variant for this OS. Same path, same content, different key.
+	if err := r.RemoveFile(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFileOS(filepath.Join(dir, "a.txt"), names[0]); err != nil {
+		t.Fatal(err)
+	}
+	s, err := r.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.StagedDeleted) != 0 {
+		t.Fatalf("StagedDeleted = %v, want empty: the index still tracks a.txt", s.StagedDeleted)
+	}
+}
+
+// TestStatusStagedDeletionInBareTarget is the consequence worth writing down:
+// a target's HEAD points at a commit while its index is empty, so every path
+// in that tree is a staged deletion. That is the truth — those blobs are in
+// neither the index nor a working tree, and diff --cached has always said so.
+func TestStatusStagedDeletionInBareTarget(t *testing.T) {
+	target, _ := newTargetDir(t, true)
+	commitIntoBare(t, target, "a.txt", "a")
+
+	s, err := target.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(s.StagedDeleted, []string{"a.txt"}) {
+		t.Fatalf("StagedDeleted = %v, want [a.txt]", s.StagedDeleted)
+	}
+	// The same answer as the command that always had it.
+	diff, err := target.DiffIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range diff.Files {
+		if f.Type == DiffDeleted && f.Name == "a.txt" {
+			return
+		}
+	}
+	t.Fatalf("diff --cached does not report a.txt as deleted: %+v", diff.Files)
 }

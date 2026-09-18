@@ -18,12 +18,16 @@ const spaces80 = "                                                              
 
 // Status holds the complete working tree status.
 type Status struct {
-	Branch     string
-	Staged     map[string]IndexEntry
-	Untracked  []string
-	Modified   []string
-	Deleted    []string
-	CommitHash string
+	Branch string
+	Staged map[string]IndexEntry
+	// StagedDeleted lists paths HEAD's tree has and the index does not — a
+	// staged deletion. Deleted (below) is a different thing: a path the index
+	// tracks that is missing from disk.
+	StagedDeleted []string
+	Untracked     []string
+	Modified      []string
+	Deleted       []string
+	CommitHash    string
 }
 
 // WorkTreeStatus scans the working directory and compares against the index.
@@ -103,7 +107,8 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		allVisible[k] = v
 	}
 
-	// Remove entries that match HEAD's tree (already committed)
+	// Remove entries that match HEAD's tree (already committed), and find the
+	// paths HEAD has that the index does not.
 	if headHashStr, err := r.ResolveHEAD(); err == nil && headHashStr != "" {
 		if h, err := core.HashFromHex(headHashStr); err == nil {
 			if commit, err := r.LoadCommit(h); err == nil {
@@ -116,6 +121,34 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 						if te, ok := treeMap[entryKey(path, entry.OSS)]; ok && te.Hash == entry.Hash {
 							delete(visible, path)
 						}
+					}
+
+					// The mirror image of a staged add, and invisible to every
+					// map above: Staged is built from index keys, and Modified
+					// and Deleted both iterate index-derived paths. Nothing
+					// else enumerates the HEAD tree, so this loop is the only
+					// place the paths can be seen.
+					seen := make(map[string]bool, len(tree.Entries))
+					for _, te := range tree.Entries {
+						if include == nil && exclude == nil {
+							if !osMatch(te.OSS, currentOS()) {
+								continue
+							}
+						} else if !MatchOSExpr(te.OSS, include, exclude) {
+							continue
+						}
+						// By name, not by composite key: a path HEAD stores as
+						// a default variant (OSS 0) and the index stores as an
+						// OS-specific one is still tracked, and entryKey would
+						// call it deleted.
+						if _, ok := allVisible[te.Name]; ok {
+							continue
+						}
+						if seen[te.Name] {
+							continue // one report per path, however many variants
+						}
+						seen[te.Name] = true
+						s.StagedDeleted = append(s.StagedDeleted, te.Name)
 					}
 				}
 			}
@@ -352,11 +385,17 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	sort.Strings(s.Untracked)
 	sort.Strings(s.Modified)
 	sort.Strings(s.Deleted)
+	sort.Strings(s.StagedDeleted)
 
 	// Advance the monitor's clock and carry the deviations forward. A
 	// deviation is a persistent condition but the monitor reports it only
 	// once, so the paths found deviant here are remembered and re-checked
 	// until the index matches them again. A nil mon is a no-op.
+	//
+	// StagedDeleted is deliberately not among them. A deviation means "differs
+	// from the index, re-check until add reconciles it"; a staged deletion is a
+	// HEAD-vs-index fact that no filesystem event will ever clear, and the path
+	// is not in the index, so mustCheck would never gate it anyway.
 	mon.save(r, s.Deleted, s.Modified)
 
 	return s, nil

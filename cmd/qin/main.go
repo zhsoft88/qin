@@ -866,6 +866,7 @@ func runStatus(args []string) error {
 
 	if len(filter) > 0 {
 		s.Staged = filterMap(s.Staged, filter)
+		s.StagedDeleted = filterList(s.StagedDeleted, filter)
 		s.Modified = filterList(s.Modified, filter)
 		s.Deleted = filterList(s.Deleted, filter)
 		s.Untracked = filterList(s.Untracked, filter)
@@ -893,6 +894,15 @@ func runStatus(args []string) error {
 			fmt.Printf("%-20s %s bytes  %s%s\n", p, humanSize(entry.Size), entry.Hash.Short(), osTag)
 		}
 	}
+	// Grouped with the staged files, not with the deleted ones: both are
+	// differences between the index and HEAD, where everything below compares
+	// the working tree against the index.
+	if len(s.StagedDeleted) > 0 {
+		fmt.Printf("\nstaged deletions: (%d)\n", len(s.StagedDeleted))
+		for _, p := range s.StagedDeleted {
+			fmt.Printf("%s\n", p)
+		}
+	}
 	if len(s.Modified) > 0 {
 		fmt.Printf("\nmodified files: (%d)\n", len(s.Modified))
 		for _, p := range s.Modified {
@@ -911,7 +921,7 @@ func runStatus(args []string) error {
 			fmt.Printf("%s\n", p)
 		}
 	}
-	if len(s.Staged) == 0 && len(s.Modified) == 0 && len(s.Deleted) == 0 && len(s.Untracked) == 0 {
+	if len(s.Staged) == 0 && len(s.StagedDeleted) == 0 && len(s.Modified) == 0 && len(s.Deleted) == 0 && len(s.Untracked) == 0 {
 		fmt.Println("\nnothing to show, working tree clean")
 	}
 	return nil
