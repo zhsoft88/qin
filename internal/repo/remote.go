@@ -938,20 +938,33 @@ func remoteRef(remoteURL, ref string) (string, error) {
 }
 
 // remoteBranches lists branch names from a remote URL (supports local path, HTTP, SSH).
+// branchNamesFromRefs extracts the branch names from a ref listing, which must
+// be keyed by full ref name.
+//
+// All three transports funnel through this for the same reason there is one
+// name for the tool: the selectors and the producers have to agree on a shape,
+// and when the SSH listing emitted "heads/main" instead of "refs/heads/main"
+// nothing failed — the filter simply matched nothing, and fetch and clone over
+// SSH returned success with an empty result. One function is one place for the
+// next producer to get it right.
+func branchNamesFromRefs(refs map[string]string) []string {
+	var branches []string
+	for ref := range refs {
+		if strings.HasPrefix(ref, "refs/heads/") {
+			branches = append(branches, strings.TrimPrefix(ref, "refs/heads/"))
+		}
+	}
+	sort.Strings(branches)
+	return branches
+}
+
 func (r *Repository) remoteBranches(remoteURL, remoteName string) ([]string, error) {
 	if strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://") {
 		refs, err := httpListRefs(remoteURL)
 		if err != nil {
 			return nil, err
 		}
-		var branches []string
-		for ref := range refs {
-			if strings.HasPrefix(ref, "refs/heads/") {
-				branches = append(branches, strings.TrimPrefix(ref, "refs/heads/"))
-			}
-		}
-		sort.Strings(branches)
-		return branches, nil
+		return branchNamesFromRefs(refs), nil
 	}
 	if strings.HasPrefix(remoteURL, "ssh://") || (strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":")) {
 		host, repoPath, err := sshParseURL(remoteURL)
@@ -962,14 +975,7 @@ func (r *Repository) remoteBranches(remoteURL, remoteName string) ([]string, err
 		if err != nil {
 			return nil, err
 		}
-		var branches []string
-		for ref := range refs {
-			if strings.HasPrefix(ref, "refs/heads/") {
-				branches = append(branches, strings.TrimPrefix(ref, "refs/heads/"))
-			}
-		}
-		sort.Strings(branches)
-		return branches, nil
+		return branchNamesFromRefs(refs), nil
 	}
 	// Local path — open remote repo and list its branches
 	remoteRepo, err := Open(remoteURL)

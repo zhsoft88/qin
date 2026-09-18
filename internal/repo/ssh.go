@@ -74,8 +74,26 @@ func sshReadRef(host, repoPath, ref string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// sshRefKey maps a path the remote's find printed under .qin to the ref name
+// callers select on. The result is what makes an SSH listing the same shape as
+// the HTTP and local ones — full ref names, "refs/heads/main".
+//
+// It is a function of its own because getting it wrong is invisible: the keys
+// were once relative to .qin/refs, so they read "heads/main", matched no
+// caller's "refs/heads/" prefix, and SSH fetch took no objects while SSH clone
+// produced an empty repository — every command exiting 0. A shape like that can
+// be tested without an SSH server, and is.
+func sshRefKey(qinDir, path string) string {
+	rel, err := filepath.Rel(qinDir, path)
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
 func sshListRefs(host, repoPath string) (map[string]string, error) {
-	refsDir := filepath.Join(repoPath, LoDir, "refs")
+	qinDir := filepath.Join(repoPath, LoDir)
+	refsDir := filepath.Join(qinDir, "refs")
 	cmd := fmt.Sprintf("find %s -type f", refsDir)
 	out, err := sshRun(host, cmd)
 	if err != nil {
@@ -88,12 +106,15 @@ func sshListRefs(host, repoPath string) (map[string]string, error) {
 		if path == "" {
 			continue
 		}
-		rel, _ := filepath.Rel(refsDir, path)
+		ref := sshRefKey(qinDir, path)
+		if ref == "" {
+			continue
+		}
 		data, err := sshRun(host, fmt.Sprintf("cat %s", path))
 		if err != nil {
 			continue
 		}
-		refs[filepath.ToSlash(rel)] = strings.TrimSpace(string(data))
+		refs[ref] = strings.TrimSpace(string(data))
 	}
 	return refs, nil
 }
@@ -332,8 +353,8 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string, force bool) erro
 	// The receiving side is a shell — there is no qin there to refuse
 	// anything — so this preflight is the only guard an SSH target gets. It
 	// reads each ref by its exact path, one ssh call apiece, rather than
-	// listing refs: sshListRefs keys its map relative to .qin/refs and is not
-	// what this needs.
+	// listing refs: it needs HEAD and core.bare too, which are not refs, and
+	// it needs only the refs it is about to write.
 	refNames, tips := r.localTips(branches)
 	head, _ := sshReadRef(host, repoPath, "HEAD")
 	st := remoteState{
