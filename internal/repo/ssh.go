@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -95,6 +96,33 @@ func sshListRefs(host, repoPath string) (map[string]string, error) {
 		refs[filepath.ToSlash(rel)] = strings.TrimSpace(string(data))
 	}
 	return refs, nil
+}
+
+// bareFromConfigJSON reports whether a .qin/config body marks the repository
+// bare. Anything unreadable or unrecognised answers false. That direction is
+// the safe one here: the SSH target has no receiving-side code to refuse a bad
+// push, so "unknown" has to mean "treat it as a checkout".
+func bareFromConfigJSON(data []byte) bool {
+	var cfg struct {
+		Core struct {
+			Bare bool `json:"bare"`
+		} `json:"core"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return false
+	}
+	return cfg.Core.Bare
+}
+
+// sshReadBare reads the target's core.bare, the one fact about it that the
+// refs cannot tell us. The cat is plumbing; the decision is in
+// bareFromConfigJSON.
+func sshReadBare(host, repoPath string) bool {
+	out, err := sshRun(host, fmt.Sprintf("cat %s", filepath.Join(repoPath, LoDir, "config")))
+	if err != nil {
+		return false
+	}
+	return bareFromConfigJSON(out)
 }
 
 func sshHasObject(host, repoPath string, hash core.Hash) bool {
@@ -307,7 +335,12 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string, force bool) erro
 	// listing refs: sshListRefs keys its map relative to .qin/refs and is not
 	// what this needs.
 	refNames, tips := r.localTips(branches)
-	st := remoteState{Refs: make(map[string]string, len(refNames))}
+	head, _ := sshReadRef(host, repoPath, "HEAD")
+	st := remoteState{
+		Bare:       sshReadBare(host, repoPath),
+		HeadBranch: headBranchFromHEAD(head),
+		Refs:       make(map[string]string, len(refNames)),
+	}
 	for _, ref := range refNames {
 		if v, err := sshReadRef(host, repoPath, ref); err == nil {
 			if v = strings.TrimSpace(v); v != "" {

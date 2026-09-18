@@ -162,8 +162,8 @@ func TestPushFirstTime(t *testing.T) {
 	}
 	defer os.RemoveAll(localDir)
 
-	// Init bare remote (no commits)
-	_, err = Init(remoteDir)
+	// A push target: InitBare, or the push to its checked-out branch is refused.
+	_, err = InitBare(remoteDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,17 +220,13 @@ func TestPushIncremental(t *testing.T) {
 	}
 	defer os.RemoveAll(localDir)
 
-	// Remote with one commit
-	remote, err := Init(remoteDir)
+	// A push target holding one commit. It has no working tree to write a file
+	// into, so the baseline goes in object by object.
+	remote, err := InitBare(remoteDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(filepath.Join(remoteDir, "f.txt"), []byte("base"), 0644)
-	remote.AddFile(filepath.Join(remoteDir, "f.txt"))
-	hBase, err := remote.WriteCommit("Test", "base")
-	if err != nil {
-		t.Fatal(err)
-	}
+	hBase := commitIntoBare(t, remote, "f.txt", "base")
 
 	// Local clones via fetch + creates local branch
 	local, err := Init(localDir)
@@ -844,6 +840,57 @@ func TestLfsStatusNoLargeFiles(t *testing.T) {
 
 // ---- push safety ----
 
+// commitIntoBare writes a one-file commit into a repository with no working
+// tree. The ordinary route — write a file, add it, commit — needs somewhere to
+// write the file, and a push target does not have one; the same tree still has
+// to be reachable so that pushes into it are fast-forwards.
+func commitIntoBare(t *testing.T, r *Repository, name, content string) core.Hash {
+	t.Helper()
+	// The layout is the same as for a checkout; only core.bare differs.
+	if !r.Config.Core.Bare {
+		t.Fatalf("commitIntoBare is for a bare repository, %s is not one", r.Path)
+	}
+
+	blob, err := r.StoreObject(core.ObjectBlob, []byte(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeHash, err := r.buildTreeFromEntries(map[string]TreeEntry{
+		name: {Hash: blob, Size: int64(len(content)), Mode: 0644},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var parents []core.Hash
+	if head, err := r.ResolveHEAD(); err == nil && head != "" {
+		p, err := core.HashFromHex(head)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parents = append(parents, p)
+	}
+	commit := Commit{
+		Tree:    treeHash,
+		Parents: parents,
+		Author:  "Test",
+		Message: name,
+		Time:    time.Now(),
+	}
+	data, err := core.SerializeJSON(commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := r.StoreObject(core.ObjectCommit, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteRef("refs/heads/main", h.String()); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 // rewindFixture is the ordinary non-fast-forward situation: alice pushed A,
 // bob built B on top of A and pushed it back, and alice — who has not fetched
 // since — has committed C on top of A. Pushing C would orphan B.
@@ -866,13 +913,19 @@ func newRewindFixture(t *testing.T, origin func(remoteDir string) string) *rewin
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
 
-	mkRepo := func(name string) (*Repository, string) {
+	// The remote is the push target, so it is bare; the two clients are
+	// checkouts, because that is what pushes into it.
+	mkRepo := func(name string, bare bool) (*Repository, string) {
 		t.Helper()
 		dir := filepath.Join(root, name)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
-		r, err := Init(dir)
+		newRepo := Init
+		if bare {
+			newRepo = InitBare
+		}
+		r, err := newRepo(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -885,10 +938,10 @@ func newRewindFixture(t *testing.T, origin func(remoteDir string) string) *rewin
 		}
 	}
 
-	remote, remoteDir := mkRepo("remote")
+	remote, remoteDir := mkRepo("remote", true)
 	url := origin(remoteDir)
 
-	alice, aliceDir := mkRepo("alice")
+	alice, aliceDir := mkRepo("alice", false)
 	if err := alice.SaveRemote("origin", url); err != nil {
 		t.Fatal(err)
 	}
@@ -1028,7 +1081,7 @@ func TestPushCompletesInterruptedRefUpdate(t *testing.T) {
 	if err := os.MkdirAll(remoteDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	remote, err := Init(remoteDir)
+	remote, err := InitBare(remoteDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1087,5 +1140,356 @@ func TestPushCompletesInterruptedRefUpdate(t *testing.T) {
 	}
 	if got := pushTipOf(t, remote); got != hC.String() {
 		t.Fatalf("target main = %s, want %s after the retry", got, hC.Short())
+	}
+}
+
+// ---- checked-out guard ----
+
+// newTargetDir creates a directory holding a repository of the requested kind
+// and returns it with its path.
+func newTargetDir(t *testing.T, bare bool) (*Repository, string) {
+	t.Helper()
+	dir, err := ioutil.TempDir("", "lo-target-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	newRepo := Init
+	if bare {
+		newRepo = InitBare
+	}
+	r, err := newRepo(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, dir
+}
+
+// pusherWithCommit is the simplest client that can be aimed at a target: a
+// checkout with one commit on main and origin already saved.
+func pusherWithCommit(t *testing.T, targetURL string) *Repository {
+	t.Helper()
+	dir, err := ioutil.TempDir("", "lo-pusher-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(dir, "f.txt"), []byte("f"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFile(filepath.Join(dir, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.WriteCommit("Test", "f"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveRemote("origin", targetURL); err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// TestCheckPushRefGuardMatrix is the rule itself, read off the four kinds of
+// target. It is a unit test on purpose: the integration tests below each reach
+// only one row of this table, and the rows that protect nothing are exactly the
+// ones a bug would turn into silent overwrites.
+func TestCheckPushRefGuardMatrix(t *testing.T) {
+	r, _ := newTargetDir(t, false)
+	old := strings.Repeat("ab", 32)
+	newTip := strings.Repeat("cd", 32)
+
+	// The fast-forward verdict is not what these cases are about, so every
+	// target starts with no ref at all: only the checked-out rule can fire.
+	cases := []struct {
+		name string
+		st   remoteState
+		ref  string
+		want string // "" means allowed
+	}{
+		{"bare target, checked-out name", remoteState{Bare: true, HeadBranch: "main"}, "refs/heads/main", ""},
+		{"detached target", remoteState{HeadBranch: ""}, "refs/heads/main", ""},
+		{"target on another branch", remoteState{HeadBranch: "other"}, "refs/heads/main", ""},
+		{"non-bare target on that branch", remoteState{HeadBranch: "main"}, "refs/heads/main", "checked out"},
+		{"non-bare target, tag", remoteState{HeadBranch: "main"}, "refs/tags/v1", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := tc.st
+			st.Refs = map[string]string{"refs/heads/other": old}
+			err := r.checkPushRef(st, tc.ref, newTip, false)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("expected the update to be allowed, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected a refusal")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestPushToCheckedOutBranchRefused(t *testing.T) {
+	target, targetDir := newTargetDir(t, false)
+	pusher := pusherWithCommit(t, targetDir)
+
+	err := pusher.Push("origin", false)
+	if err == nil {
+		t.Fatal("expected a push to a non-bare target's checked-out branch to be refused")
+	}
+	if !strings.Contains(err.Error(), "checked out") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := target.ReadRef("refs/heads/main"); err == nil {
+		t.Fatal("the refused push still wrote the target's main")
+	}
+}
+
+// TestPushForceDoesNotOverrideCheckedOut pins the decision that --force covers
+// the fast-forward rule and nothing else: being checked out is a property of
+// the target, not of the update, so there is no way for the pusher to consent
+// to it.
+func TestPushForceDoesNotOverrideCheckedOut(t *testing.T) {
+	target, targetDir := newTargetDir(t, false)
+	pusher := pusherWithCommit(t, targetDir)
+
+	err := pusher.Push("origin", true)
+	if err == nil {
+		t.Fatal("--force must not override the checked-out refusal")
+	}
+	if !strings.Contains(err.Error(), "checked out") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := target.ReadRef("refs/heads/main"); err == nil {
+		t.Fatal("the refused push still wrote the target's main")
+	}
+}
+
+func TestPushToNonBareTargetErrorNamesInitBare(t *testing.T) {
+	_, targetDir := newTargetDir(t, false)
+	pusher := pusherWithCommit(t, targetDir)
+
+	err := pusher.Push("origin", false)
+	if err == nil {
+		t.Fatal("expected a refusal")
+	}
+	// The remedy is not guessable, so the message has to carry it.
+	if !strings.Contains(err.Error(), "qin init --bare") {
+		t.Fatalf("the refusal does not name the remedy: %v", err)
+	}
+}
+
+// TestPushToOtherBranchOfNonBareTargetAllowed shows the guard is per ref, not
+// per target: a checkout that is on some other branch is an ordinary target
+// for the branches it is not on.
+func TestPushToOtherBranchOfNonBareTargetAllowed(t *testing.T) {
+	target, targetDir := newTargetDir(t, false)
+	if err := target.SetHEAD("ref: refs/heads/other"); err != nil {
+		t.Fatal(err)
+	}
+	pusher := pusherWithCommit(t, targetDir)
+
+	if err := pusher.Push("origin", false); err != nil {
+		t.Fatalf("pushing a branch the target does not have checked out: %v", err)
+	}
+	got, err := target.ReadRef("refs/heads/main")
+	if err != nil {
+		t.Fatalf("the push did not write main: %v", err)
+	}
+	tip, err := pusher.ReadRef("refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != tip {
+		t.Fatalf("target main = %s, want %s", got[:8], tip[:8])
+	}
+}
+
+// TestPushToDetachedHeadTargetAllowed: a detached HEAD has no branch checked
+// out, so it protects nothing. The target is a real checkout — cloned from,
+// and carrying a commit — with its HEAD moved off the branch.
+func TestPushToDetachedHeadTargetAllowed(t *testing.T) {
+	target, targetDir := newTargetDir(t, false)
+	if err := ioutil.WriteFile(filepath.Join(targetDir, "base.txt"), []byte("base"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.AddFile(filepath.Join(targetDir, "base.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.WriteCommit("Test", "base"); err != nil {
+		t.Fatal(err)
+	}
+	head, err := target.ResolveHEAD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.SetHEAD(head); err != nil {
+		t.Fatal(err)
+	}
+
+	// The pusher's commit is a child of the target's, so only the
+	// checked-out rule could refuse it.
+	pusherDir, err := ioutil.TempDir("", "lo-detached-pusher-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(pusherDir) })
+	pusher, err := Clone(targetDir, pusherDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(pusherDir, "next.txt"), []byte("next"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := pusher.AddFile(filepath.Join(pusherDir, "next.txt")); err != nil {
+		t.Fatal(err)
+	}
+	tip, err := pusher.WriteCommit("Test", "next")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := pusher.Push("origin", false); err != nil {
+		t.Fatalf("pushing to a target with a detached HEAD: %v", err)
+	}
+	got, err := target.ReadRef("refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != tip.String() {
+		t.Fatalf("target main = %s, want %s", got[:8], tip.Short())
+	}
+}
+
+// TestPushToBareTargetAllowsCheckedOutName: a bare target protects no branch,
+// the name it has checked out included. The other half — that a bare target
+// still refuses a non-fast-forward — is TestPushRewindRefused, whose target is
+// bare as well.
+func TestPushToBareTargetAllowsCheckedOutName(t *testing.T) {
+	target, targetDir := newTargetDir(t, true)
+	pusher := pusherWithCommit(t, targetDir)
+
+	if err := pusher.Push("origin", false); err != nil {
+		t.Fatalf("a bare target must accept a push to main: %v", err)
+	}
+	tip, err := pusher.ReadRef("refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := target.ReadRef("refs/heads/main"); err != nil || got != tip {
+		t.Fatalf("target main = %q (%v), want %s", got, err, tip[:8])
+	}
+}
+
+func TestInitBareConfig(t *testing.T) {
+	_, bareDir := newTargetDir(t, true)
+	bareCfg, err := LoadConfig(bareDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bareCfg.Core.Bare {
+		t.Fatal("InitBare did not set core.bare")
+	}
+	data, err := ioutil.ReadFile(filepath.Join(bareDir, ".qin", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"bare": true`) {
+		t.Fatalf("core.bare is not written to the target's config: %s", data)
+	}
+
+	// A plain Init is a checkout, and its config must not have grown a field:
+	// omitempty is what keeps existing repositories byte-identical.
+	_, plainDir := newTargetDir(t, false)
+	data, err = ioutil.ReadFile(filepath.Join(plainDir, ".qin", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "bare") {
+		t.Fatalf("a non-bare config should not mention bare: %s", data)
+	}
+	plainCfg, err := LoadConfig(plainDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plainCfg.Core.Bare {
+		t.Fatal("a plain Init must not be bare")
+	}
+
+	// core.bare is the escape hatch for a target that already exists, so it
+	// has to be reachable through the config commands.
+	if v, err := ConfigGet(plainCfg, "core.bare"); err != nil || v != "false" {
+		t.Fatalf("core.bare = %q, %v, want false", v, err)
+	}
+	if err := ConfigSet(plainCfg, "core.bare", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := ConfigGet(plainCfg, "core.bare"); v != "true" {
+		t.Fatalf("core.bare = %q after set, want true", v)
+	}
+	if err := ConfigSet(plainCfg, "core.bare", "maybe"); err == nil {
+		t.Fatal("expected an invalid bool to be rejected")
+	}
+	if err := ConfigUnset(plainCfg, "core.bare"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := ConfigGet(plainCfg, "core.bare"); v != "false" {
+		t.Fatalf("core.bare = %q after unset, want false", v)
+	}
+	if _, ok := ConfigKeys()["core.bare"]; !ok {
+		t.Fatal("core.bare missing from ConfigKeys")
+	}
+}
+
+func TestBareFromConfigJSON(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+		want bool
+	}{
+		{"bare", `{"core":{"bare":true}}`, true},
+		{"not bare", `{"core":{"bare":false}}`, false},
+		{"key absent", `{"core":{"fsmonitor":"true"}}`, false},
+		{"no core", `{}`, false},
+		{"empty", ``, false},
+		{"not json", `not json at all`, false},
+		{"wrong type", `{"core":{"bare":"yes"}}`, false},
+		{"truncated", `{"core":{"bare":tr`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := bareFromConfigJSON([]byte(tc.data)); got != tc.want {
+				t.Fatalf("bareFromConfigJSON(%q) = %v, want %v", tc.data, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHeadBranchFromHEAD(t *testing.T) {
+	cases := []struct {
+		head string
+		want string
+	}{
+		{"ref: refs/heads/main\n", "main"},
+		{"ref: refs/heads/feature/x", "feature/x"},
+		{"ref:refs/heads/main", "main"},
+		{"  ref: refs/heads/main  ", "main"},
+		{"ref: refs/tags/v1", ""}, // a tag is not a checked-out branch
+		{"ref: HEAD", ""},
+		{"0123456789abcdef", ""}, // detached: a hash protects nothing
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := headBranchFromHEAD(tc.head); got != tc.want {
+			t.Errorf("headBranchFromHEAD(%q) = %q, want %q", tc.head, got, tc.want)
+		}
 	}
 }

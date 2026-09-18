@@ -798,11 +798,57 @@ func Clone(url, dir string, lazy bool) (*Repository, error) {
 
 // ---- push preflight ----
 
-// remoteState is a snapshot of a push target's ref state, gathered before any
-// object transfer. Each transport builds it its own way; the decisions below
-// are written once.
+// remoteState is a snapshot of a push target, gathered before any object
+// transfer. Each transport builds it its own way; the decisions below are
+// written once.
 type remoteState struct {
-	Refs map[string]string // full ref name -> hash
+	// Bare is the target's core.bare. A missing or unreadable value reads as
+	// false, i.e. as a checkout — an old server that does not publish the key
+	// is refused conservatively rather than trusted.
+	Bare bool
+	// HeadBranch is the branch the target has checked out, or "" when HEAD is
+	// detached, unreadable or not a branch. Nothing is protected then.
+	HeadBranch string
+	Refs       map[string]string // full ref name -> hash
+}
+
+// targetState snapshots the repository a push is about to write into. Both
+// sides that have the target open — the local-path transport and the HTTP
+// server — build their state here.
+func targetState(t *Repository, refs []string) remoteState {
+	st := remoteState{
+		Bare: t.Config.Core.Bare,
+		// CurrentBranch is "" for a detached HEAD, which protects nothing.
+		HeadBranch: t.CurrentBranch(),
+		Refs:       make(map[string]string, len(refs)),
+	}
+	for _, ref := range refs {
+		v, err := t.ReadRef(ref)
+		if err != nil {
+			continue // absent: the ref is being created
+		}
+		if v = strings.TrimSpace(v); v != "" {
+			st.Refs[ref] = v
+		}
+	}
+	return st
+}
+
+// headBranchFromHEAD extracts the branch from a raw symbolic HEAD value
+// ("ref: refs/heads/main") for the transports that read the file rather than
+// asking the repository. A detached HEAD holds a hash instead, and that is not
+// a branch: it protects nothing, so it answers the empty string — as does
+// anything else that is not under refs/heads/.
+func headBranchFromHEAD(head string) string {
+	ref := strings.TrimSpace(head)
+	if !strings.HasPrefix(ref, "ref:") {
+		return ""
+	}
+	ref = strings.TrimSpace(strings.TrimPrefix(ref, "ref:"))
+	if !strings.HasPrefix(ref, "refs/heads/") {
+		return ""
+	}
+	return strings.TrimPrefix(ref, "refs/heads/")
 }
 
 // localTips reads the tip of every named branch, returned in the order given
@@ -828,23 +874,6 @@ func (r *Repository) localTips(branches []string) ([]string, map[string]string) 
 	return refs, tips
 }
 
-// targetState snapshots the ref state of the repository a push is about to
-// write into. Both sides that have the target open — the local-path transport
-// and the HTTP server — build their state here.
-func targetState(t *Repository, refs []string) remoteState {
-	st := remoteState{Refs: make(map[string]string, len(refs))}
-	for _, ref := range refs {
-		v, err := t.ReadRef(ref)
-		if err != nil {
-			continue // absent: the ref is being created
-		}
-		if v = strings.TrimSpace(v); v != "" {
-			st.Refs[ref] = v
-		}
-	}
-	return st
-}
-
 // checkPushRef reports why writing localTip to ref must be refused, or nil.
 // force overrides the fast-forward rule and nothing else.
 //
@@ -854,6 +883,14 @@ func targetState(t *Repository, refs []string) remoteState {
 // decisively not an ancestor — not merely unknown — which is exactly the
 // ordinary case of pushing over someone else's commits.
 func (r *Repository) checkPushRef(st remoteState, ref, localTip string, force bool) error {
+	// Checked-out first, so that a push which trips both rules reports the one
+	// the user has to act on.
+	if st.HeadBranch != "" && !st.Bare {
+		if ref == "refs/heads/"+st.HeadBranch {
+			return fmt.Errorf("refusing to update %s: checked out in the target (non-bare repository); create push targets with 'qin init --bare'", ref)
+		}
+	}
+
 	remoteTip := st.Refs[ref]
 	if remoteTip == "" || remoteTip == localTip {
 		return nil // creating the ref, or already up to date

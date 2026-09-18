@@ -18,6 +18,13 @@ type Config struct {
 		// Fsmonitor is "false" (default, off) or "true" (use the built-in
 		// change monitor). Empty is treated as off.
 		Fsmonitor string `json:"fsmonitor,omitempty"`
+		// Bare marks a repository with no working tree: a push target. It is
+		// the one thing that separates "push target" from "checkout", so it
+		// defaults to false — a plain Init is a checkout, and a push to the
+		// branch it has checked out is refused. omitempty keeps the config of
+		// a non-bare repository byte-identical to what it was before the field
+		// existed.
+		Bare bool `json:"bare,omitempty"`
 	} `json:"core"`
 	Diff struct {
 		MaxSize  int `json:"max_size"`  // skip content diff if file exceeds this (bytes)
@@ -75,6 +82,7 @@ var configKeys = map[string]string{
 	"core.chunk_threshold": "Average chunk size in bytes (default 4194304)",
 	"core.chunk_max_size":  "Maximum chunk size in bytes (default 8388608)",
 	"core.fsmonitor":       "Skip unchanged files in status using the built-in change monitor: false | true",
+	"core.bare":            "No working tree: a push target, which protects no branch from being pushed to: false | true",
 	"diff.max_size":        "Skip content diff if file exceeds this in bytes (default 524288)",
 	"diff.max_lines":       "Skip line diff if file exceeds this many lines (default 2000)",
 	"user.name":            "User name for commit author",
@@ -95,6 +103,8 @@ func ConfigGet(cfg *Config, key string) (string, error) {
 			return FsmonitorOff, nil
 		}
 		return cfg.Core.Fsmonitor, nil
+	case "core.bare":
+		return strconv.FormatBool(cfg.Core.Bare), nil
 	case "diff.max_size":
 		return strconv.Itoa(cfg.Diff.MaxSize), nil
 	case "diff.max_lines":
@@ -137,6 +147,12 @@ func ConfigSet(cfg *Config, key, value string) error {
 		if cfg.Core.Fsmonitor == "" {
 			cfg.Core.Fsmonitor = FsmonitorOff
 		}
+	case "core.bare":
+		v, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("invalid core.bare value: %s (use false or true)", value)
+		}
+		cfg.Core.Bare = v
 	case "diff.max_size":
 		v, err := strconv.Atoi(value)
 		if err != nil {
@@ -170,6 +186,8 @@ func ConfigUnset(cfg *Config, key string) error {
 		cfg.Core.ChunkMaxSize = 8 * 1024 * 1024
 	case "core.fsmonitor":
 		cfg.Core.Fsmonitor = FsmonitorOff
+	case "core.bare":
+		cfg.Core.Bare = false
 	case "diff.max_size":
 		cfg.Diff.MaxSize = 512 * 1024
 	case "diff.max_lines":

@@ -43,7 +43,7 @@ func main() {
 		os.Exit(1)
 	}
 	cmds := map[string]command{
-		"init":              {"init", "Initialize a new repository", runInit},
+		"init":              {"init", "Initialize a new repository [--bare]", runInit},
 		"add":               {"add", "Stage file(s) for commit", runAdd},
 		"rm":                {"rm", "Remove staged file(s)", runRm},
 		"commit":            {"commit", "Create a commit from staged files", runCommit},
@@ -97,7 +97,9 @@ func main() {
 func usage() {
 	fmt.Println("Usage: " + core.Name + ` <command> [options]
 Commands:
-  init [<path>]     Initialize a new repository (default: current dir)
+  init [--bare] [<path>]
+                     Initialize a new repository (default: current dir);
+                     --bare marks a push target, which protects no branch
   add <file>        Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
   rm [--cached] [-r] <file>   Remove files (--cached keeps on disk)
   commit            Create a commit from staged files
@@ -146,10 +148,22 @@ OS identifiers: win, mac, linux`)
 
 // ---- init ----
 func runInit(args []string) error {
+	// A manual loop rather than a FlagSet: this is one optional positional
+	// argument plus one boolean, and --bare has to work on either side of the
+	// path, the way clone's flags do.
+	bare := false
 	path := "."
-	if len(args) > 0 && args[0] != "" {
-		path = args[0]
+	for _, a := range args {
+		switch a {
+		case "--bare":
+			bare = true
+		default:
+			if a != "" {
+				path = a
+			}
+		}
 	}
+
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -157,11 +171,19 @@ func runInit(args []string) error {
 	if err := os.MkdirAll(abs, 0755); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
-	r, err := repo.Init(abs)
+	newRepo := repo.Init
+	if bare {
+		newRepo = repo.InitBare
+	}
+	r, err := newRepo(abs)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("initialized empty repository at %s\n", r.Path)
+	if bare {
+		fmt.Printf("initialized empty repository at %s (bare: a push target)\n", r.Path)
+	} else {
+		fmt.Printf("initialized empty repository at %s\n", r.Path)
+	}
 	return nil
 }
 

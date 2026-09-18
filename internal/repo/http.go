@@ -297,14 +297,18 @@ func (r *Repository) pushHTTP(baseURL, remoteName string, force bool) error {
 	}
 	sort.Strings(branches)
 
-	// One listing gives the whole preflight its state, the server's HEAD
-	// included. The refs the server publishes are compared below as full
-	// names; "HEAD" is not one of them and is ignored here.
+	// One listing gives the whole preflight its state, the server's HEAD and
+	// core.bare included. The refs are compared below as full names, so the
+	// two keys that are not refs simply never match.
 	remoteRefs, err := httpListRefs(baseURL)
 	if err != nil {
 		return fmt.Errorf("read remote refs: %w", err)
 	}
-	st := remoteState{Refs: remoteRefs}
+	st := remoteState{
+		Bare:       remoteRefs["core.bare"] == "true",
+		HeadBranch: headBranchFromHEAD(remoteRefs["HEAD"]),
+		Refs:       remoteRefs,
+	}
 
 	refNames, tips := r.localTips(branches)
 	for _, ref := range refNames {

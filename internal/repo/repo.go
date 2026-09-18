@@ -14,8 +14,21 @@ type Repository struct {
 	Config *Config
 }
 
-// Init creates a new repository at the given path.
+// Init creates a new repository at the given path. It is a checkout rather
+// than a push target: a push to the branch it has checked out is refused.
 func Init(path string) (*Repository, error) {
+	return initRepo(path, false)
+}
+
+// InitBare creates a new repository at the given path with core.bare set: a
+// push target, which protects no branch. The layout is identical to Init's —
+// only the marker differs, which is what keeps serve, clone and pushing from a
+// bare repository working unchanged.
+func InitBare(path string) (*Repository, error) {
+	return initRepo(path, true)
+}
+
+func initRepo(path string, bare bool) (*Repository, error) {
 	if path == "" {
 		path = "."
 	}
@@ -45,6 +58,7 @@ func Init(path string) (*Repository, error) {
 	}
 
 	cfg := DefaultConfig()
+	cfg.Core.Bare = bare
 	if err := SaveConfig(absPath, cfg); err != nil {
 		return nil, err
 	}

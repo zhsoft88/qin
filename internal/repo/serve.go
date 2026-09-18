@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -84,6 +85,10 @@ func (r *Repository) serveRefs(w http.ResponseWriter, req *http.Request) {
 	})
 	head, _ := r.ReadHEAD()
 	refs["HEAD"] = head
+	// A pushing client has no other way to learn whether this is a target or a
+	// checkout. It is not a ref, but it is the only extra fact the preflight
+	// needs, and the clients filter the listing by the refs/heads/ prefix.
+	refs["core.bare"] = strconv.FormatBool(r.Config.Core.Bare)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(refs)

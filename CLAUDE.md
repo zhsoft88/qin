@@ -61,13 +61,21 @@ Fast-forward is checkable **without any remote objects**: it holds iff the targe
 
 `serveRefPut` re-checks server-side (it has the target repo, and clients PUT objects before refs, so the ancestry walk has everything it needs). `?force=1` is the server's only force signal; a refusal is **409**, a real write failure stays 500. Its `validRefName` also closes an arbitrary-file-write hole: the ref from the URL path is joined onto `.qin`, so `PUT /ref/refs/../../evil` used to escape the repository.
 
+**Push target vs checkout.** Writing the branch a target has checked out desynchronises its index and worktree from HEAD, and the damage outlives the push: the next routine `commit` there builds a tree that does not mention what was pushed. So the checked-out branch is refused too, and **`--force` does not override it** — being checked out is a property of the target, not of the update, so the pusher has no signal that could mean "I consent". This is qin's `receive.denyCurrentBranch`.
+
+The discriminator is `core.bare`. A bare repository is a push target and protects nothing; a non-bare one is a checkout and protects exactly one ref, the one HEAD points at (detached HEAD protects nothing, and a target on some other branch is an ordinary target for every branch it is not on). `qin init` produces a checkout and `qin init --bare` produces a target; `core.bare` is also a config key so that an already-created repository can be converted in place — `Init` refuses a directory that already has a `.qin`, so that key is the only remedy. The field is `omitempty`, so a non-bare config is byte-identical to what it was before the field existed.
+
+`--bare` deliberately does nothing else: no layout change, no `clone --bare`, no refusing `add`/`commit` in a bare repo. A bare repository is layout-identical to a checkout, which is what keeps `serve`, `clone` and pushing out of one working unchanged; gating ten CLI entry points to improve an error message is not worth it. The honest consequence: `qin config core.bare true` inside a live working repository turns off its own protection, the same escape hatch git's `core.bare` has — the config key's description says "no working tree" for that reason.
+
+The rule is checked **before** the fast-forward rule, so a push that trips both reports the one the user has to act on. Per transport: the local path and the HTTP server read `Config.Core.Bare` + `CurrentBranch()` off the target they already have open; an HTTP client reads the `core.bare` and `HEAD` keys `serveRefs` publishes (an old server that omits `core.bare` reads as non-bare, which refuses conservatively — the direction that fails safe); SSH reads `.qin/config` and `.qin/HEAD` and parses them with `bareFromConfigJSON` / `headBranchFromHEAD`. **SSH targets are protected by the pushing client alone** — the receiving side there is a shell `mkdir -p && cat >` with no qin in it, so there is nowhere else to stand.
+
 ### Key Data Flows
 
 1. **Add → Commit**: `AddFileToIndex` (read file → CDC chunk → store objects → index entry) → `WriteCommit` (build tree from index → store commit → update branch ref)
 2. **Status**: `WorkTreeStatus` → load index → `visibleEntries` (OS filter) → compare HEAD tree (staged) → walk working tree (modified/untracked) → check deleted. With `core.fsmonitor` on, the change monitor's paths are consulted first so unchanged index entries skip their `lstat` — it only ever subtracts work, never a conclusion
 3. **Clone**: `Init` → `Fetch` (DAG walk, skip chunk blobs for lazy) → create branch → checkout
 4. **Merge**: `FindMergeBase` (BFS) → fast-forward or 3-way per-file compare with conflict detection
-5. **Push**: preflight (`checkPushRef` for every branch, sorted, aborting before anything is transferred) → `collectObjects` from HEAD (ancestors `HasObject`-check against remote) → `copyObject` each missing object → write the refs in the same order
+5. **Push**: preflight (`checkPushRef` for every branch, sorted, aborting before anything is transferred — checked-out first, then fast-forward) → `collectObjects` from HEAD (ancestors `HasObject`-check against remote) → `copyObject` each missing object → write the refs in the same order
 6. **Stash**: Save current index as a commit with `refs/stash` → restore HEAD to working tree. StashPop reverses it
 7. **GC**: `markReachableRefsFull` (walk all refs, recurse commits→trees→entries) → enumerate all objects → prune unreachable
 
@@ -90,7 +98,7 @@ The invariant every other decision serves: **the monitor may only remove work, n
 ```
 .qin/
   HEAD                — "ref: refs/heads/main" or a commit hash
-  config              — JSON config (chunk sizes, diff limits, user, core.fsmonitor)
+  config              — JSON config (chunk sizes, diff limits, user, core.fsmonitor, core.bare)
   index               — binary staging area (QINIDX v1; JSON auto-migrated)
   untracked-cache.json— per-directory untracked lists for fast status (git core.untrackedCache style)
   objects/            — Git-style XX/YYYYYY hash layout

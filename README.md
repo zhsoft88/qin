@@ -58,6 +58,9 @@ qin branch feature
 qin switch feature
 
 # 远程协作
+# 服务器上先创建推送目标（--bare：没有工作树，不保护任何分支）
+qin init --bare /srv/repo
+# 客户端
 qin remote add origin http://example.com/repo
 qin push origin
 qin pull origin
@@ -70,7 +73,7 @@ qin clone http://example.com/repo myrepo
 
 | 命令 | 说明 |
 |------|------|
-| `init [<path>]` | 初始化新仓库（默认当前目录） |
+| `init [--bare] [<path>]` | 初始化新仓库（默认当前目录）；`--bare` 标记为推送目标（无工作树，任何分支都不受保护） |
 | `add <file> [--os \| --os-match <expr>] [--exclude <glob> \| --exclude @file]` | 暂存文件（`--os` 标记为当前 OS 变体；`--os-match` 指定 OS 表达式；`--exclude` 排除匹配文件，`@file` 从文件读取排除模式） |
 | `rm <file>` | 移除已暂存文件 |
 | `commit -m <msg>` | 从暂存区创建提交 |
@@ -115,6 +118,16 @@ error: push: refusing to update refs/heads/main: not a fast-forward (the target 
 `qin push --force` 覆盖这条拒绝。被顶掉的提交不会立刻消失：`qin lost-found` 仍能列出它们，直到 `qin gc` 运行。
 
 判定在推送方完成——目标尖端若不在本地对象库里，缺失这一事实本身就足以断定它不是祖先——所以本地路径、HTTP、SSH 三种传输的判定完全一致。HTTP 服务端会再检查一次作为纵深防御；SSH 远端没有 Go 代码，只有新版客户端能保护它。
+
+**检出保护。** 推送目标上正在被检出的那个分支一律拒绝写入，因为写它会同时让目标的索引和工作树失同步：
+
+```
+error: push: refusing to update refs/heads/main: checked out in the target (non-bare repository); create push targets with 'qin init --bare'
+```
+
+这条拒绝**不可用 `--force` 覆盖**：是否为检出是目标的属性，与这次更新是否快进无关，推送方没有可以表示「我同意」的信号。保护是**逐分支**的——目标检出的若只是别的分支，其余分支照常接受；HEAD 分离则什么都不保护。
+
+判定依据是目标 config 里的 `core.bare`。`qin init` 建的是检出（`core.bare` 缺席即为 false），**推送目标应当用 `qin init --bare` 创建**。已经建好的仓库可以用 `qin config core.bare true` 就地转成推送目标——这也是唯一的补救办法。
 
 ### 高级操作
 
@@ -244,6 +257,7 @@ qin lfs pull large-file.bin
 | `core.chunk_min_size` | 最小分块大小（字节），默认 1048576 |
 | `core.chunk_threshold` | 分块阈值（字节），默认 4194304 |
 | `core.chunk_max_size` | 最大分块大小（字节），默认 8388608 |
+| `core.bare` | 无工作树，标记为推送目标，不保护任何分支，默认 false |
 | `diff.max_size` | 跳过内容 diff 的文件大小阈值（字节），默认 524288 |
 | `diff.max_lines` | 跳过行级 diff 的行数阈值，默认 2000 |
 | `user.name` | 提交作者姓名 |

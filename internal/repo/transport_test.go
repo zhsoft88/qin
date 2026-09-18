@@ -103,8 +103,8 @@ func TestHTTPPush(t *testing.T) {
 	}
 	defer os.RemoveAll(localDir)
 
-	// Init bare remote (no commits)
-	_, err = Init(remoteDir)
+	// A push target: InitBare, or the push to its checked-out branch is refused.
+	_, err = InitBare(remoteDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,17 +230,13 @@ func TestHTTPPushIncremental(t *testing.T) {
 	}
 	defer os.RemoveAll(localDir)
 
-	// Remote with one commit
-	remote, err := Init(remoteDir)
+	// A push target holding one commit. It has no working tree to write a file
+	// into, so the baseline goes in object by object.
+	remote, err := InitBare(remoteDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ioutil.WriteFile(filepath.Join(remoteDir, "f.txt"), []byte("base"), 0644)
-	remote.AddFile(filepath.Join(remoteDir, "f.txt"))
-	hBase, err := remote.WriteCommit("Test", "base")
-	if err != nil {
-		t.Fatal(err)
-	}
+	hBase := commitIntoBare(t, remote, "f.txt", "base")
 
 	// Start HTTP server
 	server := startRepoServer(t, remoteDir)
@@ -451,10 +447,10 @@ func TestHTTPRefList(t *testing.T) {
 
 func TestSSHParseURL(t *testing.T) {
 	tests := []struct {
-		input    string
-		host     string
-		path     string
-		wantErr  bool
+		input   string
+		host    string
+		path    string
+		wantErr bool
 	}{
 		{"ssh://git@github.com/user/repo", "git@github.com", "/user/repo", false},
 		{"ssh://git@github.com:22/user/repo", "git@github.com:22", "/user/repo", false},
@@ -649,7 +645,7 @@ func TestServeRefPutRefusesNonFastForward(t *testing.T) {
 	}
 	defer os.RemoveAll(dir)
 
-	r, err := Init(dir)
+	r, err := InitBare(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -767,5 +763,84 @@ func TestServeRefPutRejectsUnsafeRefName(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// ---- checked-out guard over HTTP ----
+
+func TestHTTPPushToCheckedOutBranchRefused(t *testing.T) {
+	target, targetDir := newTargetDir(t, false)
+	server := startRepoServer(t, targetDir)
+	defer server.Close()
+
+	pusher := pusherWithCommit(t, server.URL)
+	err := pusher.Push("origin", false)
+	if err == nil {
+		t.Fatal("expected a push to a non-bare target's checked-out branch to be refused")
+	}
+	if !strings.Contains(err.Error(), "checked out") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := target.ReadRef("refs/heads/main"); err == nil {
+		t.Fatal("the refused push still wrote the target's main")
+	}
+}
+
+// TestServeRefPutRefusesCheckedOutBranch is the server's own gate, reached
+// without a qin client: a raw PUT is refused because the target has that
+// branch checked out, and ?force=1 does not change that — the force signal
+// covers the fast-forward rule only, on the client and on the server alike.
+func TestServeRefPutRefusesCheckedOutBranch(t *testing.T) {
+	target, targetDir := newTargetDir(t, false)
+	server := startRepoServer(t, targetDir)
+	defer server.Close()
+
+	tip := strings.Repeat("ab", 32)
+	for _, path := range []string{"ref/refs/heads/main", "ref/refs/heads/main?force=1"} {
+		resp, body := putRef(t, server.URL, path, tip)
+		if resp.StatusCode != 409 {
+			t.Errorf("PUT %s: status %d, want 409 (body %q)", path, resp.StatusCode, body)
+		}
+		if !strings.Contains(body, "checked out") {
+			t.Errorf("PUT %s: body %q does not say why", path, body)
+		}
+	}
+	if _, err := target.ReadRef("refs/heads/main"); err == nil {
+		t.Fatal("a refused PUT still wrote the target's main")
+	}
+
+	// A branch the target does not have checked out goes through, so the
+	// refusal is about that one ref rather than about the target.
+	resp, body := putRef(t, server.URL, "ref/refs/heads/topic", tip)
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT of an unchecked-out branch: status %d (body %q)", resp.StatusCode, body)
+	}
+}
+
+// TestServeRefsPublishesBare pins the one fact a pushing client cannot read
+// out of the refs: whether the target is a push target or a checkout.
+func TestServeRefsPublishesBare(t *testing.T) {
+	_, bareDir := newTargetDir(t, true)
+	server := startRepoServer(t, bareDir)
+	defer server.Close()
+
+	refs, err := httpListRefs(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refs["core.bare"] != "true" {
+		t.Fatalf("core.bare = %q, want true", refs["core.bare"])
+	}
+
+	_, plainDir := newTargetDir(t, false)
+	plainServer := startRepoServer(t, plainDir)
+	defer plainServer.Close()
+
+	refs, err = httpListRefs(plainServer.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refs["core.bare"] != "false" {
+		t.Fatalf("core.bare = %q, want false", refs["core.bare"])
 	}
 }
