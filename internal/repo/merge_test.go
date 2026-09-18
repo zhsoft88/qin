@@ -10,6 +10,87 @@ import (
 	"github.com/zhsoft88/qin/internal/core"
 )
 
+// TestIsAncestor covers the walk push uses to decide fast-forward. The
+// load-bearing case is a commit the repository does not have: local history is
+// complete, so an absent commit is decisively not an ancestor rather than an
+// unknown, and that is what makes pushing over someone else's commits fail
+// without asking the target anything.
+func TestIsAncestor(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commit := func(name string) core.Hash {
+		t.Helper()
+		f := filepath.Join(dir, name)
+		if err := ioutil.WriteFile(f, []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.AddFile(f); err != nil {
+			t.Fatal(err)
+		}
+		h, err := r.WriteCommit("Test", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+
+	// A <- B <- C, then back to B for a sibling D, so C and D diverge.
+	hA := commit("a.txt")
+	hB := commit("b.txt")
+	hC := commit("c.txt")
+	// Move the branch back to B and take the worktree with it, so D is a
+	// second child of B rather than a child of C.
+	if err := r.WriteRef("refs/heads/main", hB.String()); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.restoreCommit(hB); err != nil {
+		t.Fatal(err)
+	}
+	hD := commit("d.txt")
+
+	absent, err := core.HashFromHex("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		anc  core.Hash
+		desc core.Hash
+		want bool
+	}{
+		{"equal", hC, hC, true},
+		{"parent", hB, hC, true},
+		{"grandparent", hA, hC, true},
+		{"reverse", hC, hA, false},
+		{"child of B", hB, hD, true},
+		{"grandparent through the branch point", hA, hD, true},
+		{"siblings", hC, hD, false},
+		{"siblings the other way", hD, hC, false},
+		{"zero ancestor", core.Hash{}, hC, false},
+		{"zero descendant", hC, core.Hash{}, false},
+		{"absent ancestor", absent, hC, false},
+		{"absent descendant", hC, absent, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := r.IsAncestor(tc.anc, tc.desc); got != tc.want {
+				t.Fatalf("IsAncestor(%s, %s) = %v, want %v",
+					tc.anc.Short(), tc.desc.Short(), got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFindMergeBaseLinear(t *testing.T) {
 	dir, err := ioutil.TempDir("", "lo-test-*")
 	if err != nil {

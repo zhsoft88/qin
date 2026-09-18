@@ -66,6 +66,47 @@ func (r *Repository) FindMergeBase(a, b core.Hash) (core.Hash, error) {
 	return core.Hash{}, fmt.Errorf("no common ancestor found")
 }
 
+// IsAncestor reports whether anc is an ancestor of desc (or equal to it),
+// walking desc's ancestry in r. A commit absent from r's object store is never
+// an ancestor: local history is complete, so absence is decisive, not unknown.
+//
+// It deliberately has no error return. Every way this can fail — an unreadable
+// or missing commit, a truncated history — means "not an ancestor", and a
+// caller that had to tell those apart could let a load error read as a pass.
+func (r *Repository) IsAncestor(anc, desc core.Hash) bool {
+	if anc.IsZero() || desc.IsZero() {
+		return false
+	}
+	if anc == desc {
+		return true
+	}
+
+	// Walk up from desc, stopping at the first hit: the depth reached is how
+	// many commits desc has that anc does not, not the length of history.
+	visited := map[core.Hash]bool{desc: true}
+	queue := []core.Hash{desc}
+	for len(queue) > 0 {
+		h := queue[0]
+		queue = queue[1:]
+
+		commit, err := r.LoadCommit(h)
+		if err != nil {
+			continue // absent locally, so it leads to no ancestor
+		}
+		for _, p := range commit.Parents {
+			if p.IsZero() || visited[p] {
+				continue
+			}
+			if p == anc {
+				return true
+			}
+			visited[p] = true
+			queue = append(queue, p)
+		}
+	}
+	return false
+}
+
 // Merge merges the given branch into the current branch.
 func (r *Repository) Merge(branch string) (*MergeResult, error) {
 	targetHashStr, err := r.ReadRef("refs/heads/" + branch)

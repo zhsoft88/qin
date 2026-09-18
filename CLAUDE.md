@@ -55,13 +55,19 @@ Files added via `add` go through `StoreChunkedFile()`:
 - Push uses `collectObjects` (DAG walk) + `copyObject` (atomic write + integrity check); Fetch does the reverse
 - `RepoServer` wraps multi-repo serving from a base directory
 
+**Push preflight.** Every push decides whether it may write each ref *before* any object moves: gather the target's state, sort the branch names, run `checkPushRef` on each, and abort the whole push on the first refusal — so a refused push leaves zero partial state. The sort is not cosmetic: aborting on the first refusal would otherwise make map iteration order user-visible.
+
+Fast-forward is checkable **without any remote objects**: it holds iff the target's current value is an ancestor of the local tip, and every ancestor of the local tip is in the local store — so a target tip that is absent locally is decisively *not* an ancestor, not an unknown. That is what lets all three transports run the same check on the pushing side, including SSH, which has no receiving-side code at all. `IsAncestor` deliberately returns no error: every way it can fail means "not an ancestor", and a caller able to tell a load error from a real answer would be able to let the error read as a pass.
+
+`serveRefPut` re-checks server-side (it has the target repo, and clients PUT objects before refs, so the ancestry walk has everything it needs). `?force=1` is the server's only force signal; a refusal is **409**, a real write failure stays 500. Its `validRefName` also closes an arbitrary-file-write hole: the ref from the URL path is joined onto `.qin`, so `PUT /ref/refs/../../evil` used to escape the repository.
+
 ### Key Data Flows
 
 1. **Add → Commit**: `AddFileToIndex` (read file → CDC chunk → store objects → index entry) → `WriteCommit` (build tree from index → store commit → update branch ref)
 2. **Status**: `WorkTreeStatus` → load index → `visibleEntries` (OS filter) → compare HEAD tree (staged) → walk working tree (modified/untracked) → check deleted. With `core.fsmonitor` on, the change monitor's paths are consulted first so unchanged index entries skip their `lstat` — it only ever subtracts work, never a conclusion
 3. **Clone**: `Init` → `Fetch` (DAG walk, skip chunk blobs for lazy) → create branch → checkout
 4. **Merge**: `FindMergeBase` (BFS) → fast-forward or 3-way per-file compare with conflict detection
-5. **Push**: `collectObjects` from HEAD (ancestors `HasObject`-check against remote) → `copyObject` each missing object
+5. **Push**: preflight (`checkPushRef` for every branch, sorted, aborting before anything is transferred) → `collectObjects` from HEAD (ancestors `HasObject`-check against remote) → `copyObject` each missing object → write the refs in the same order
 6. **Stash**: Save current index as a commit with `refs/stash` → restore HEAD to working tree. StashPop reverses it
 7. **GC**: `markReachableRefsFull` (walk all refs, recurse commits→trees→entries) → enumerate all objects → prune unreachable
 

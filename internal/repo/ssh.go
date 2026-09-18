@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -293,18 +294,39 @@ func (r *Repository) fetchSSH(host, repoPath, remoteName string) error {
 	return nil
 }
 
-func (r *Repository) pushSSH(host, repoPath, remoteName string) error {
+func (r *Repository) pushSSH(host, repoPath, remoteName string, force bool) error {
 	branches, _, err := r.ListBranches()
 	if err != nil {
 		return err
+	}
+	sort.Strings(branches)
+
+	// The receiving side is a shell — there is no qin there to refuse
+	// anything — so this preflight is the only guard an SSH target gets. It
+	// reads each ref by its exact path, one ssh call apiece, rather than
+	// listing refs: sshListRefs keys its map relative to .qin/refs and is not
+	// what this needs.
+	refNames, tips := r.localTips(branches)
+	st := remoteState{Refs: make(map[string]string, len(refNames))}
+	for _, ref := range refNames {
+		if v, err := sshReadRef(host, repoPath, ref); err == nil {
+			if v = strings.TrimSpace(v); v != "" {
+				st.Refs[ref] = v
+			}
+		}
+	}
+	for _, ref := range refNames {
+		if err := r.checkPushRef(st, ref, tips[ref], force); err != nil {
+			return err
+		}
 	}
 
 	allObjects := make(map[core.Hash]bool)
 	branchRefs := make(map[string]core.Hash)
 
 	for _, branchName := range branches {
-		hashStr, err := r.ReadRef("refs/heads/" + branchName)
-		if err != nil {
+		hashStr, ok := tips["refs/heads/"+branchName]
+		if !ok {
 			continue
 		}
 		hash, err := core.HashFromHex(hashStr)
@@ -343,9 +365,17 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string) error {
 		endProgressLine()
 	}
 
-	// Update refs
-	for branchName, hash := range branchRefs {
-		if err := sshWriteRef(host, repoPath, "refs/heads/"+branchName, hash.String()); err != nil {
+	// Update refs, in the preflight's order.
+	for _, branchName := range branches {
+		hash, ok := branchRefs[branchName]
+		if !ok {
+			continue
+		}
+		ref := "refs/heads/" + branchName
+		if st.Refs[ref] == hash.String() {
+			continue
+		}
+		if err := sshWriteRef(host, repoPath, ref, hash.String()); err != nil {
 			return fmt.Errorf("update ref %s: %w", branchName, err)
 		}
 	}

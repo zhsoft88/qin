@@ -510,22 +510,23 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 	return nil
 }
 
-// Push pushes all local branches to the named remote.
-func (r *Repository) Push(remoteName string) error {
+// Push pushes all local branches to the named remote. force allows a branch
+// whose update is not a fast-forward to overwrite the target's commits.
+func (r *Repository) Push(remoteName string, force bool) error {
 	remoteURL, err := r.LoadRemote(remoteName)
 	if err != nil {
 		return fmt.Errorf("remote not found: %s", remoteName)
 	}
 
 	if strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://") {
-		return r.pushHTTP(remoteURL, remoteName)
+		return r.pushHTTP(remoteURL, remoteName, force)
 	}
 	if strings.HasPrefix(remoteURL, "ssh://") || strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":") {
 		host, repoPath, err := sshParseURL(remoteURL)
 		if err != nil {
 			return err
 		}
-		return r.pushSSH(host, repoPath, remoteName)
+		return r.pushSSH(host, repoPath, remoteName, force)
 	}
 
 	// Local path
@@ -538,14 +539,27 @@ func (r *Repository) Push(remoteName string) error {
 	if err != nil {
 		return err
 	}
+	sort.Strings(branches)
+
+	// Preflight every branch before transferring anything, so a refusal leaves
+	// the target untouched. refNames is sorted, which is what makes the branch
+	// named in the error the same on every run now that one bad branch aborts
+	// the whole push.
+	refNames, tips := r.localTips(branches)
+	st := targetState(remoteRepo, refNames)
+	for _, ref := range refNames {
+		if err := r.checkPushRef(st, ref, tips[ref], force); err != nil {
+			return err
+		}
+	}
 
 	allObjects := make(map[core.Hash]bool)
 	branchRefs := make(map[string]core.Hash)
 
 	fmt.Fprintf(os.Stderr, "scanning repository...\n")
 	for _, branchName := range branches {
-		hashStr, err := r.ReadRef("refs/heads/" + branchName)
-		if err != nil {
+		hashStr, ok := tips["refs/heads/"+branchName]
+		if !ok {
 			continue
 		}
 		hash, err := core.HashFromHex(hashStr)
@@ -565,8 +579,10 @@ func (r *Repository) Push(remoteName string) error {
 
 	total := len(allObjects)
 	if total == 0 {
+		// No object has to move, but a ref may still be missing: an
+		// interrupted push writes objects before refs, and this retry has to
+		// finish that rather than report success and stop.
 		fmt.Fprintf(os.Stderr, "everything up to date\n")
-		return nil
 	}
 	if total > 1 {
 		printProgress("found %d objects to push", total)
@@ -586,13 +602,26 @@ func (r *Repository) Push(remoteName string) error {
 		printProgress("pushing objects: %d/%d done", i, total)
 		endProgressLine()
 	}
-	fmt.Fprintf(os.Stderr, "pushed to %s\n", remoteName)
-
-	for branchName, hash := range branchRefs {
+	// Write the refs in the order the preflight used. A ref already pointing
+	// where it should is left alone; every other one is written even when no
+	// object had to move.
+	wroteRef := false
+	for _, branchName := range branches {
+		hash, ok := branchRefs[branchName]
+		if !ok {
+			continue
+		}
 		ref := "refs/heads/" + branchName
+		if st.Refs[ref] == hash.String() {
+			continue
+		}
 		if err := remoteRepo.WriteRef(ref, hash.String()); err != nil {
 			return fmt.Errorf("write ref %s: %w", ref, err)
 		}
+		wroteRef = true
+	}
+	if total > 0 || wroteRef {
+		fmt.Fprintf(os.Stderr, "pushed to %s\n", remoteName)
 	}
 
 	return nil
@@ -765,6 +794,83 @@ func Clone(url, dir string, lazy bool) (*Repository, error) {
 	}
 
 	return r, nil
+}
+
+// ---- push preflight ----
+
+// remoteState is a snapshot of a push target's ref state, gathered before any
+// object transfer. Each transport builds it its own way; the decisions below
+// are written once.
+type remoteState struct {
+	Refs map[string]string // full ref name -> hash
+}
+
+// localTips reads the tip of every named branch, returned in the order given
+// (the callers sort first) alongside a ref-name lookup. The tips are read once
+// and then used both to decide and to write, so the value a refusal describes
+// is the value that would have been pushed rather than a second read a
+// concurrent commit could have separated from the first.
+//
+// A branch whose ref cannot be read is left out entirely, so it is neither
+// checked nor written — an unreadable ref is not a licence to skip the check.
+func (r *Repository) localTips(branches []string) ([]string, map[string]string) {
+	refs := make([]string, 0, len(branches))
+	tips := make(map[string]string, len(branches))
+	for _, branchName := range branches {
+		ref := "refs/heads/" + branchName
+		tip, err := r.ReadRef(ref)
+		if err != nil {
+			continue
+		}
+		refs = append(refs, ref)
+		tips[ref] = tip
+	}
+	return refs, tips
+}
+
+// targetState snapshots the ref state of the repository a push is about to
+// write into. Both sides that have the target open — the local-path transport
+// and the HTTP server — build their state here.
+func targetState(t *Repository, refs []string) remoteState {
+	st := remoteState{Refs: make(map[string]string, len(refs))}
+	for _, ref := range refs {
+		v, err := t.ReadRef(ref)
+		if err != nil {
+			continue // absent: the ref is being created
+		}
+		if v = strings.TrimSpace(v); v != "" {
+			st.Refs[ref] = v
+		}
+	}
+	return st
+}
+
+// checkPushRef reports why writing localTip to ref must be refused, or nil.
+// force overrides the fast-forward rule and nothing else.
+//
+// The fast-forward test needs no objects from the target: fast-forward means
+// the target's current value is an ancestor of localTip, and every ancestor of
+// localTip is in this repository. A target tip that is not here is therefore
+// decisively not an ancestor — not merely unknown — which is exactly the
+// ordinary case of pushing over someone else's commits.
+func (r *Repository) checkPushRef(st remoteState, ref, localTip string, force bool) error {
+	remoteTip := st.Refs[ref]
+	if remoteTip == "" || remoteTip == localTip {
+		return nil // creating the ref, or already up to date
+	}
+
+	anc, err := core.HashFromHex(remoteTip)
+	if err != nil {
+		return fmt.Errorf("refusing to update %s: the target has an unreadable value for it (%q)", ref, remoteTip)
+	}
+	desc, err := core.HashFromHex(localTip)
+	if err != nil {
+		return fmt.Errorf("refusing to update %s: %q is not a hash", ref, localTip)
+	}
+	if r.IsAncestor(anc, desc) || force {
+		return nil
+	}
+	return fmt.Errorf("refusing to update %s: not a fast-forward (the target has commits that are not in your history); overwrite with --force (orphaned commits stay recoverable via 'qin lost-found' until 'qin gc' runs)", ref)
 }
 
 // remoteRef reads a ref from a remote URL (supports local path, HTTP, SSH).

@@ -61,7 +61,7 @@ func main() {
 		"cherry-pick":       {"cherry-pick", "Apply changes from an existing commit", runCherryPick},
 		"stash":             {"stash", "Stash or pop working tree changes", runStash},
 		"remote":            {"remote", "Manage remotes", runRemote},
-		"push":              {"push", "Push to remote", runPush},
+		"push":              {"push", "Push to remote [--force]", runPush},
 		"fetch":             {"fetch", "Fetch from remote", runFetch},
 		"pull":              {"pull", "Pull from remote and merge", runPull},
 		"clone":             {"clone", "Clone a repository [--lazy]", runClone},
@@ -115,7 +115,9 @@ Commands:
   cherry-pick <ref>  Apply changes from an existing commit
   stash [pop|list]   Stash or pop working tree changes
   remote [add <name> <path>|remove <name>|list]  Manage remotes
-  push [<remote>]    Push to remote (default: origin)
+  push [--force] [<remote>]
+                     Push to remote (default: origin); refuses a
+                     non-fast-forward update unless --force is given
   fetch [<remote>]   Fetch from remote (default: origin)
   pull [<remote>]    Pull from remote and merge (default: origin)
   clone [--lazy] [--recursive] <url> <dir>  Clone a repository
@@ -1325,15 +1327,25 @@ func runRemote(args []string) error {
 
 // ---- push ----
 func runPush(args []string) error {
+	force := false
+	rest := make([]string, 0, len(args))
+	for _, a := range args {
+		if a == "--force" {
+			force = true
+			continue
+		}
+		rest = append(rest, a)
+	}
+
 	r, err := findRepo()
 	if err != nil {
 		return err
 	}
 	remote := "origin"
-	if len(args) > 0 {
-		remote = args[0]
+	if len(rest) > 0 {
+		remote = rest[0]
 	}
-	if err := r.Push(remote); err != nil {
+	if err := r.Push(remote, force); err != nil {
 		return fmt.Errorf("push: %w", err)
 	}
 	return nil

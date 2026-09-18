@@ -2,9 +2,11 @@ package repo
 
 import (
 	"io/ioutil"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -128,7 +130,7 @@ func TestHTTPPush(t *testing.T) {
 	}
 
 	// Push via HTTP
-	if err := local.Push("origin"); err != nil {
+	if err := local.Push("origin", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -266,7 +268,7 @@ func TestHTTPPushIncremental(t *testing.T) {
 	}
 
 	// Push via HTTP
-	if err := local.Push("origin"); err != nil {
+	if err := local.Push("origin", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -524,7 +526,7 @@ func TestSSHURLDetection(t *testing.T) {
 	}
 
 	// Push to non-existent SSH remote should fail (SSH connection error)
-	err = r.Push("sshremote")
+	err = r.Push("sshremote", false)
 	if err == nil {
 		t.Fatal("expected error pushing to SSH remote with no server")
 	}
@@ -575,5 +577,195 @@ func TestRemoteBranchesHTTP(t *testing.T) {
 	}
 	if branches[0] != "feature" || branches[1] != "main" {
 		t.Fatalf("expected [feature, main], got %v", branches)
+	}
+}
+
+// ---- push safety over HTTP ----
+
+// httpOrigin returns an origin callback serving remoteDir, so the shared
+// rewind fixture can be run over the HTTP transport unchanged.
+func httpOrigin(t *testing.T) func(string) string {
+	t.Helper()
+	return func(remoteDir string) string {
+		server := startRepoServer(t, remoteDir)
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+}
+
+func TestHTTPPushRewindRefused(t *testing.T) {
+	f := newRewindFixture(t, httpOrigin(t))
+
+	err := f.alice.Push("origin", false)
+	if err == nil {
+		t.Fatal("expected the server to refuse a non-fast-forward push")
+	}
+	if !strings.Contains(err.Error(), "not a fast-forward") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := pushTipOf(t, f.remote); got != f.hB.String() {
+		t.Fatalf("target main = %s, want bob's %s", got, f.hB.Short())
+	}
+}
+
+func TestHTTPPushForceRewind(t *testing.T) {
+	f := newRewindFixture(t, httpOrigin(t))
+
+	if err := f.alice.Push("origin", true); err != nil {
+		t.Fatalf("--force should allow the overwrite: %v", err)
+	}
+	if got := pushTipOf(t, f.remote); got != f.hC.String() {
+		t.Fatalf("target main = %s, want alice's %s", got, f.hC.Short())
+	}
+}
+
+// putRef issues a raw ref PUT, the request a client that never learned the
+// rules would send.
+func putRef(t *testing.T, baseURL, path, body string) (*http.Response, string) {
+	t.Helper()
+	req, err := http.NewRequest("PUT", baseURL+"/"+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp, strings.TrimSpace(string(data))
+}
+
+// TestServeRefPutRefusesNonFastForward checks the server's own gate: a hand
+// written PUT has no client-side preflight behind it, and objects are always
+// uploaded before refs, so by the time this runs the target can decide.
+func TestServeRefPutRefusesNonFastForward(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-serve-put-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) core.Hash {
+		t.Helper()
+		if err := ioutil.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.AddFile(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+		h, err := r.WriteCommit("Test", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	hA := write("a.txt", "a")
+	hB := write("b.txt", "b") // main is now at B
+
+	server := startRepoServer(t, dir)
+	defer server.Close()
+
+	// Rewinding main to A drops B: not a fast-forward.
+	resp, body := putRef(t, server.URL, "ref/refs/heads/main", hA.String())
+	if resp.StatusCode != 409 {
+		t.Fatalf("rewind PUT: status %d, want 409 (body %q)", resp.StatusCode, body)
+	}
+	if got := pushTipOf(t, r); got != hB.String() {
+		t.Fatalf("a refused PUT changed main to %s", got)
+	}
+
+	// The explicit force signal is what makes the overwrite intentional.
+	resp, body = putRef(t, server.URL, "ref/refs/heads/main?force=1", hA.String())
+	if resp.StatusCode != 200 {
+		t.Fatalf("forced PUT: status %d, want 200 (body %q)", resp.StatusCode, body)
+	}
+	if got := pushTipOf(t, r); got != hA.String() {
+		t.Fatalf("main = %s, want %s after the forced PUT", got, hA.Short())
+	}
+
+	// And forward again is a fast-forward, so no force is needed.
+	resp, body = putRef(t, server.URL, "ref/refs/heads/main", hB.String())
+	if resp.StatusCode != 200 {
+		t.Fatalf("fast-forward PUT: status %d, want 200 (body %q)", resp.StatusCode, body)
+	}
+	if got := pushTipOf(t, r); got != hB.String() {
+		t.Fatalf("main = %s, want %s", got, hB.Short())
+	}
+}
+
+// TestServeRefPutRejectsUnsafeRefName covers the hole a raw PUT would otherwise
+// open: the ref path is joined onto .qin, so "refs/../../evil" would write a
+// file outside the repository.
+func TestServeRefPutRejectsUnsafeRefName(t *testing.T) {
+	root, err := ioutil.TempDir("", "lo-serve-ref-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+
+	repoDir := filepath.Join(root, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Init(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(repoDir, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFile(filepath.Join(repoDir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	hA, err := r.WriteCommit("Test", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server := startRepoServer(t, repoDir)
+	defer server.Close()
+
+	for _, ref := range []string{
+		"refs/../../evil",
+		"refs/heads/../../evil",
+		"refs/heads/",
+		"refs/heads/.hidden",
+		"refs/heads/../main",
+		"HEAD",
+		"refs/heads/a b",
+	} {
+		resp, body := putRef(t, server.URL, "ref/"+ref, hA.String())
+		if resp.StatusCode != 400 {
+			t.Errorf("PUT %q: status %d, want 400 (body %q)", ref, resp.StatusCode, body)
+		}
+	}
+
+	// Nothing escaped .qin: the only files under the repo are the ones qin made.
+	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if strings.Contains(path, string(os.PathSeparator)+".qin"+string(os.PathSeparator)) {
+			return nil
+		}
+		if filepath.Base(path) == "a.txt" {
+			return nil
+		}
+		t.Errorf("unexpected file written outside .qin: %s", path)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

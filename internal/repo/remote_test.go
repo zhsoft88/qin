@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -184,7 +185,7 @@ func TestPushFirstTime(t *testing.T) {
 	}
 
 	// Push
-	if err := local.Push("origin"); err != nil {
+	if err := local.Push("origin", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -253,7 +254,7 @@ func TestPushIncremental(t *testing.T) {
 	}
 
 	// Push
-	if err := local.Push("origin"); err != nil {
+	if err := local.Push("origin", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -600,7 +601,7 @@ func TestPushPullNonExistentRemote(t *testing.T) {
 	}
 
 	// Push to non-existent remote
-	err = r.Push("nonexistent")
+	err = r.Push("nonexistent", false)
 	if err == nil {
 		t.Fatal("expected error for nonexistent remote")
 	}
@@ -718,10 +719,10 @@ func TestLazyCloneAndLfsPull(t *testing.T) {
 	remote.AddFile(filepath.Join(remoteDir, "readme.txt"))
 
 	remote.Config.Core.ChunkMinSize = 128
-		remote.Config.Core.ChunkThreshold = 512
-		remote.Config.Core.ChunkMaxSize = 1024
+	remote.Config.Core.ChunkThreshold = 512
+	remote.Config.Core.ChunkMaxSize = 1024
 
-		largeData := make([]byte, 5000)
+	largeData := make([]byte, 5000)
 	for i := range largeData {
 		largeData[i] = byte(i % 251)
 	}
@@ -838,5 +839,253 @@ func TestLfsStatusNoLargeFiles(t *testing.T) {
 	}
 	if len(files) != 0 {
 		t.Fatalf("expected empty lfs status, got %d files", len(files))
+	}
+}
+
+// ---- push safety ----
+
+// rewindFixture is the ordinary non-fast-forward situation: alice pushed A,
+// bob built B on top of A and pushed it back, and alice — who has not fetched
+// since — has committed C on top of A. Pushing C would orphan B.
+type rewindFixture struct {
+	alice, bob, remote *Repository
+	hA, hB, hC         core.Hash
+}
+
+// localOrigin is the origin callback for fixtures whose remote is a directory.
+func localOrigin(remoteDir string) string { return remoteDir }
+
+// newRewindFixture builds the fixture. origin maps the remote directory to the
+// URL the two clients should use, so the same setup serves the local-path and
+// the HTTP transports; it is called once the remote repository exists.
+func newRewindFixture(t *testing.T, origin func(remoteDir string) string) *rewindFixture {
+	t.Helper()
+	root, err := ioutil.TempDir("", "lo-rewind-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+
+	mkRepo := func(name string) (*Repository, string) {
+		t.Helper()
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		r, err := Init(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r, dir
+	}
+	write := func(dir, name, content string) {
+		t.Helper()
+		if err := ioutil.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	remote, remoteDir := mkRepo("remote")
+	url := origin(remoteDir)
+
+	alice, aliceDir := mkRepo("alice")
+	if err := alice.SaveRemote("origin", url); err != nil {
+		t.Fatal(err)
+	}
+	write(aliceDir, "a.txt", "a")
+	if err := alice.AddFile(filepath.Join(aliceDir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	hA, err := alice.WriteCommit("Test", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.Push("origin", false); err != nil {
+		t.Fatal(err)
+	}
+
+	bobDir := filepath.Join(root, "bob")
+	bob, err := Clone(url, bobDir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(bobDir, "b.txt", "b")
+	if err := bob.AddFile(filepath.Join(bobDir, "b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	hB, err := bob.WriteCommit("Test", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bob.Push("origin", false); err != nil {
+		t.Fatal(err)
+	}
+
+	write(aliceDir, "c.txt", "c")
+	if err := alice.AddFile(filepath.Join(aliceDir, "c.txt")); err != nil {
+		t.Fatal(err)
+	}
+	hC, err := alice.WriteCommit("Test", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return &rewindFixture{alice: alice, bob: bob, remote: remote, hA: hA, hB: hB, hC: hC}
+}
+
+func pushTipOf(t *testing.T, r *Repository) string {
+	t.Helper()
+	tip, err := r.ReadRef("refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tip
+}
+
+func TestPushRewindRefused(t *testing.T) {
+	f := newRewindFixture(t, localOrigin)
+
+	err := f.alice.Push("origin", false)
+	if err == nil {
+		t.Fatal("expected a non-fast-forward push to be refused")
+	}
+	if !strings.Contains(err.Error(), "not a fast-forward") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Refused means refused: nothing was written and bob's commit is the tip.
+	if got := pushTipOf(t, f.remote); got != f.hB.String() {
+		t.Fatalf("target main = %s, want bob's %s", got, f.hB.Short())
+	}
+	if !f.remote.HasObject(f.hB) {
+		t.Fatal("bob's commit disappeared from the target")
+	}
+}
+
+// TestPushRewindAfterFetchRefused is the same refusal decided the other way:
+// with bob's tip in alice's object store the verdict comes from the ancestry
+// walk rather than from the commit being absent.
+func TestPushRewindAfterFetchRefused(t *testing.T) {
+	f := newRewindFixture(t, localOrigin)
+
+	if err := f.alice.Fetch("origin"); err != nil {
+		t.Fatal(err)
+	}
+	if !f.alice.HasObject(f.hB) {
+		t.Fatal("fetch did not bring bob's commit")
+	}
+
+	if err := f.alice.Push("origin", false); err == nil {
+		t.Fatal("expected the push to stay refused after a fetch")
+	}
+	if got := pushTipOf(t, f.remote); got != f.hB.String() {
+		t.Fatalf("target main = %s, want bob's %s", got, f.hB.Short())
+	}
+}
+
+func TestPushForceAllowsRewind(t *testing.T) {
+	f := newRewindFixture(t, localOrigin)
+
+	if err := f.alice.Push("origin", true); err != nil {
+		t.Fatalf("--force should allow the overwrite: %v", err)
+	}
+	if got := pushTipOf(t, f.remote); got != f.hC.String() {
+		t.Fatalf("target main = %s, want alice's %s", got, f.hC.Short())
+	}
+	// Bob's commit is orphaned, not deleted: it stays until gc prunes it.
+	if !f.remote.HasObject(f.hB) {
+		t.Fatal("orphaned commit should stay in the target until gc")
+	}
+}
+
+func TestPushUpToDateIsNoOp(t *testing.T) {
+	f := newRewindFixture(t, localOrigin)
+
+	if err := f.alice.Push("origin", true); err != nil {
+		t.Fatal(err)
+	}
+	// The second push has nothing to transfer and the ref already agrees.
+	if err := f.alice.Push("origin", false); err != nil {
+		t.Fatalf("a push of an unchanged branch must be a no-op: %v", err)
+	}
+	if got := pushTipOf(t, f.remote); got != f.hC.String() {
+		t.Fatalf("target main = %s, want %s", got, f.hC.Short())
+	}
+}
+
+// TestPushCompletesInterruptedRefUpdate covers the state an interrupted push
+// leaves: every object has arrived, but the ref was never written. A push
+// whose objects are all present must still finish that ref rather than report
+// "everything up to date" and stop.
+func TestPushCompletesInterruptedRefUpdate(t *testing.T) {
+	root, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+
+	remoteDir := filepath.Join(root, "remote")
+	if err := os.MkdirAll(remoteDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	remote, err := Init(remoteDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	aliceDir := filepath.Join(root, "alice")
+	if err := os.MkdirAll(aliceDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	alice, err := Init(aliceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(aliceDir, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.AddFile(filepath.Join(aliceDir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := alice.WriteCommit("Test", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.SaveRemote("origin", remoteDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.Push("origin", false); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ioutil.WriteFile(filepath.Join(aliceDir, "c.txt"), []byte("c"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := alice.AddFile(filepath.Join(aliceDir, "c.txt")); err != nil {
+		t.Fatal(err)
+	}
+	hC, err := alice.WriteCommit("Test", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Transfer the objects without touching the ref — the interrupted push.
+	objects, err := alice.collectObjects(remote, hC, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for h := range objects {
+		if err := copyObject(alice, remote, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if before := pushTipOf(t, remote); before == hC.String() {
+		t.Fatal("fixture is wrong: the ref was already updated")
+	}
+
+	if err := alice.Push("origin", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := pushTipOf(t, remote); got != hC.String() {
+		t.Fatalf("target main = %s, want %s after the retry", got, hC.Short())
 	}
 }

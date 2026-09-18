@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -289,18 +290,35 @@ func (r *Repository) fetchHTTP(baseURL, remoteName string, lazy bool) error {
 
 // ---- HTTP push ----
 
-func (r *Repository) pushHTTP(baseURL, remoteName string) error {
+func (r *Repository) pushHTTP(baseURL, remoteName string, force bool) error {
 	branches, _, err := r.ListBranches()
 	if err != nil {
 		return err
+	}
+	sort.Strings(branches)
+
+	// One listing gives the whole preflight its state, the server's HEAD
+	// included. The refs the server publishes are compared below as full
+	// names; "HEAD" is not one of them and is ignored here.
+	remoteRefs, err := httpListRefs(baseURL)
+	if err != nil {
+		return fmt.Errorf("read remote refs: %w", err)
+	}
+	st := remoteState{Refs: remoteRefs}
+
+	refNames, tips := r.localTips(branches)
+	for _, ref := range refNames {
+		if err := r.checkPushRef(st, ref, tips[ref], force); err != nil {
+			return err
+		}
 	}
 
 	allObjects := make(map[core.Hash]bool)
 	branchRefs := make(map[string]core.Hash)
 
 	for _, branchName := range branches {
-		hashStr, err := r.ReadRef("refs/heads/" + branchName)
-		if err != nil {
+		hashStr, ok := tips["refs/heads/"+branchName]
+		if !ok {
 			continue
 		}
 		hash, err := core.HashFromHex(hashStr)
@@ -340,9 +358,23 @@ func (r *Repository) pushHTTP(baseURL, remoteName string) error {
 		endProgressLine()
 	}
 
-	// Update remote refs
-	for branchName, hash := range branchRefs {
-		if err := httpPut(baseURL, "ref/refs/heads/"+branchName, []byte(hash.String())); err != nil {
+	// Update remote refs, in the preflight's order. force is handed to the
+	// server as well: it re-checks, and that query is the only way it can tell
+	// an intentional overwrite from one it must refuse.
+	for _, branchName := range branches {
+		hash, ok := branchRefs[branchName]
+		if !ok {
+			continue
+		}
+		ref := "refs/heads/" + branchName
+		if st.Refs[ref] == hash.String() {
+			continue
+		}
+		path := "ref/" + ref
+		if force {
+			path += "?force=1"
+		}
+		if err := httpPut(baseURL, path, []byte(hash.String())); err != nil {
 			return fmt.Errorf("update ref %s: %w", branchName, err)
 		}
 	}

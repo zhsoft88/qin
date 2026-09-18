@@ -100,11 +100,21 @@ qin clone http://example.com/repo myrepo
 | `remote add <name> <url>` | 添加远程仓库 |
 | `remote remove <name>` | 移除远程 |
 | `remote list` | 列出远程 |
-| `push [<remote>]` | 推送本地分支到远程（默认 origin） |
+| `push [<remote>] [--force]` | 推送本地分支到远程（默认 origin）；非快进推送被拒绝，`--force` 覆盖 |
 | `fetch [<remote>]` | 从远程拉取对象和引用（默认 origin） |
 | `pull [<remote>]` | 拉取并合并远程变更（默认 origin） |
 | `clone [--lazy] [--recursive] <url> <dir>` | 克隆远程仓库（`--lazy` 跳过 LFS 分块，`--recursive` 同时克隆子模块） |
 | `serve [--addr <addr>] [--base-path <path>]` | 启动 HTTP 服务器（默认 :8080；`--base-path` 多仓库模式） |
+
+**非快进保护。** 目标分支上有本地历史里没有的提交时，`push` 会在传输任何对象之前整体拒绝，以免对方那些提交被顶成孤儿：
+
+```
+error: push: refusing to update refs/heads/main: not a fast-forward (the target has commits that are not in your history); overwrite with --force (orphaned commits stay recoverable via 'qin lost-found' until 'qin gc' runs)
+```
+
+`qin push --force` 覆盖这条拒绝。被顶掉的提交不会立刻消失：`qin lost-found` 仍能列出它们，直到 `qin gc` 运行。
+
+判定在推送方完成——目标尖端若不在本地对象库里，缺失这一事实本身就足以断定它不是祖先——所以本地路径、HTTP、SSH 三种传输的判定完全一致。HTTP 服务端会再检查一次作为纵深防御；SSH 远端没有 Go 代码，只有新版客户端能保护它。
 
 ### 高级操作
 

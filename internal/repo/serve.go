@@ -98,13 +98,60 @@ func (r *Repository) serveRefGet(w http.ResponseWriter, req *http.Request, ref s
 	w.Write([]byte(data))
 }
 
+// validRefName reports whether a ref path from a request may be written. The
+// path is handed to WriteRef, which joins it onto .qin, so without this a PUT
+// of "refs/../../evil" writes outside the repository entirely. Components
+// follow the same rules git enforces on a ref name.
+func validRefName(ref string) bool {
+	var prefix string
+	switch {
+	case strings.HasPrefix(ref, "refs/heads/"):
+		prefix = "refs/heads/"
+	case strings.HasPrefix(ref, "refs/tags/"):
+		prefix = "refs/tags/"
+	default:
+		return false
+	}
+	name := ref[len(prefix):]
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || strings.HasPrefix(part, ".") || part == ".." {
+			return false
+		}
+		for _, c := range part {
+			switch {
+			case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+			case c == '.' || c == '-' || c == '_':
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (r *Repository) serveRefPut(w http.ResponseWriter, req *http.Request, ref string) {
+	if !validRefName(ref) {
+		http.Error(w, "invalid ref name: "+ref, 400)
+		return
+	}
 	data, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	if err := r.WriteRef(ref, strings.TrimSpace(string(data))); err != nil {
+
+	// The receiving side applies the same rules a pushing client does: a
+	// client that never learned them must not be able to overwrite what is
+	// served here. The new tip is already uploaded by the time this runs — a
+	// client PUTs objects before refs — so the ancestry walk has all it needs.
+	// force is the only signal that an overwrite is intentional.
+	force := req.URL.Query().Get("force") == "1"
+	newVal := strings.TrimSpace(string(data))
+	if err := r.checkPushRef(targetState(r, []string{ref}), ref, newVal, force); err != nil {
+		http.Error(w, err.Error(), 409)
+		return
+	}
+	if err := r.WriteRef(ref, newVal); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
