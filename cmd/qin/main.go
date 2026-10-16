@@ -263,7 +263,14 @@ func runAdd(args []string) error {
 // directory and this walk would then record the target's contents under the
 // link's path — the link would never be recorded, and status, which reads
 // dirents with Lstat semantics, would report it untracked forever.
+//
+// The repository's own metadata directory is not walked either, for the same
+// kind of reason: it holds the index being written and the objects being
+// stored, so descending into it records this walk's own half-written output.
 func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
+	if skipRepoMetadata(r, path) {
+		return nil
+	}
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -375,9 +382,12 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
 //
-// Lstat for the same reason as addFileOrDir: this walk does not follow
-// symlinks either.
+// Lstat and the metadata skip are both for the same reasons as addFileOrDir:
+// this walk does not follow symlinks, and does not enter .qin.
 func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
+	if skipRepoMetadata(r, path) {
+		return nil
+	}
 	// Derived once, before either branch: the expression is the same for every
 	// path this walk reaches, and the empty-directory branch below needs it as
 	// much as the file branch does. It used to hardcode mask 0 there, so
@@ -501,6 +511,22 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		}
 	}
 	return nil
+}
+
+// skipRepoMetadata prints a skip line and reports true when path lies inside
+// the repository's own metadata directory, which no walk may enter.
+//
+// It is not silent: a path the user named outright — `add .qin` — must not
+// look like it was added. But it is one line for the directory, not one for
+// every file inside it, so `add .` stays readable however large the object
+// store has grown.
+func skipRepoMetadata(r *repo.Repository, path string) bool {
+	rel := relPath(r, path)
+	if !repo.IsRepoMetadataPath(rel) {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "\nskip: %s (repository metadata)   \n", rel)
+	return true
 }
 
 func relPath(r *repo.Repository, path string) string {

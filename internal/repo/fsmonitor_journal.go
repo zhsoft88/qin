@@ -232,13 +232,13 @@ func validChangePath(p string) bool {
 	if !safeRepoPath(p) {
 		return false
 	}
-	// A path used as an index key is never the monitor's own state, and never
-	// carries a NUL — index keys are "path\0<oss_mask>", so an embedded NUL
-	// would let one record name a different entry than it appears to.
+	// An index key never carries a NUL — keys are "path\0<oss_mask>", so an
+	// embedded NUL would let one record name a different entry than it appears
+	// to — and never names the repository's own metadata.
 	if strings.ContainsRune(p, 0) {
 		return false
 	}
-	if p == LoDir || strings.HasPrefix(p, LoDir+"/") {
+	if IsRepoMetadataPath(p) {
 		return false
 	}
 	return true

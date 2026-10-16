@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -805,5 +806,36 @@ func TestWriteWorkTreeFileReplacesSymlinkAtTarget(t *testing.T) {
 	}
 	if string(content) != "PWNED" {
 		t.Fatalf("wrote %q, want %q", content, "PWNED")
+	}
+}
+
+// TestAddFileToIndexRefusesRepoMetadata pins the leaf half of the rule that
+// the add walk honours by not descending. The walk is where it is usually
+// applied; this is where it is enforced — for any caller that never walked
+// anything, the index must still not gain a key naming qin's own storage.
+func TestAddFileToIndexRefusesRepoMetadata(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// .qin/config and .qin/HEAD are regular files: without the guard they are
+	// added successfully, so they are the cases that discriminate. .qin itself
+	// is caught by the non-empty-directory rule as well, and has to report the
+	// metadata reason rather than that one.
+	for _, p := range []string{".qin", ".qin/config", ".qin/HEAD"} {
+		_, err := r.AddFileToIndex(filepath.Join(repoDir, filepath.FromSlash(p)), 0, idx)
+		if err == nil {
+			t.Errorf("AddFileToIndex accepted %s", p)
+			continue
+		}
+		if !strings.Contains(err.Error(), LoDir) {
+			t.Errorf("AddFileToIndex refused %s with %q, want the metadata reason", p, err)
+		}
+	}
+
+	if len(idx.Entries) != 0 {
+		t.Fatalf("index gained %d entries: %v", len(idx.Entries), idx.Entries)
 	}
 }

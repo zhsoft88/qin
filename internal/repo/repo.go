@@ -5,9 +5,26 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
+// LoDir is the repository's own metadata directory, at the repository root.
 var LoDir = ".qin"
+
+// IsRepoMetadataPath reports whether a repo-relative path in slash form names
+// the repository's own metadata directory or something inside it. The rule is
+// that qin's storage is not content: the index, the object store and the refs
+// are what qin reads and writes *about* the working tree, so a path inside
+// them may never become an index key. A walk that descended into .qin/objects
+// would be recording its own half-written output — the objects it stored for
+// the files it had just read.
+//
+// Only the root .qin is metadata. A nested directory that happens to be called
+// .qin is ordinary content, as is a submodule's own metadata, which is reached
+// through its configured path rather than by name here.
+func IsRepoMetadataPath(p string) bool {
+	return p == LoDir || strings.HasPrefix(p, LoDir+"/")
+}
 
 type Repository struct {
 	Path   string

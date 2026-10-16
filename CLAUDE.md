@@ -130,6 +130,10 @@ The invariant every other decision serves: **the monitor may only remove work, n
     daemon.log        — the detached daemon's stdout and stderr
 ```
 
+**The metadata directory is never content.** `IsRepoMetadataPath` is the one predicate for that — a repo-relative path in slash form equal to `.qin` or beneath it — and every rule about it goes through that function, because the three callers each learned it separately once already. `AddFileToIndex` refuses such a path, so no caller can put qin's storage into the index being written. The `add` walks test it before descending **and before the leaf is reached**, which is the half that matters for more than tidiness: `qin add .` used to walk into `.qin/objects` and index what it found there — including the objects it had stored seconds earlier for the files it was reading. `status`'s untracked scan skips the same path at the root (where an entry's name is its whole repo-relative path), and `validChangePath` refuses a journal record that names it, so a "skip the stat" hint can never point at the monitor's own state.
+
+Only the root `.qin` counts. A nested directory that happens to be called `.qin` is ordinary content, and so is a submodule's own metadata — reached through its configured path, never by name here. `.qinignore` is deliberately **not** in this class: it is a file the user may track, like `.gitignore`, and `add` treats it as one.
+
 ### Legacy Naming
 
 The project was originally named "lo" and now calls itself `qin` everywhere it

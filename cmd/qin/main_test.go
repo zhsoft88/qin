@@ -72,6 +72,25 @@ func indexAfterAddOSExpr(t *testing.T, r *repo.Repository, path string) *repo.In
 	return idx
 }
 
+// indexAfterAdd is runAdd's path when no OS expression was given: same walker,
+// index left unsaved.
+func indexAfterAdd(t *testing.T, r *repo.Repository, path string) *repo.Index {
+	t.Helper()
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignorer, err := r.LoadIgnoreMatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	added := 0
+	if err := addFileOrDir(r, filepath.Join(r.Path, path), nil, &added, idx, ignorer); err != nil {
+		t.Fatal(err)
+	}
+	return idx
+}
+
 func indexedPaths(idx *repo.Index) []string {
 	var out []string
 	for key := range idx.Entries {
@@ -136,6 +155,45 @@ func TestAddDoesNotFollowSymlinkToDir(t *testing.T) {
 	want := []string{"pkg/_current", "pkg/real/sub/deep.txt", "pkg/real/thing.txt"}
 	if got := indexedPaths(idx); !reflect.DeepEqual(got, want) {
 		t.Fatalf("indexed %v, want %v", got, want)
+	}
+}
+
+// TestAddDoesNotEnterRepoMetadata is the regression test for `add .` indexing
+// the repository itself: HEAD, config, the object store, the empty ref
+// directories. The walk had no idea .qin was anything other than a directory
+// to descend into, and what it found there was its own output — the objects it
+// had just stored for the files it was reading. status skips the same
+// directory, so the result was never reported as staged *or* untracked; it
+// existed only in the index, which is the one place nobody looks.
+func TestAddDoesNotEnterRepoMetadata(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "a.txt", "hello")
+
+	if got := indexedPaths(indexAfterAdd(t, r, ".")); !reflect.DeepEqual(got, []string{"a.txt"}) {
+		t.Fatalf("add . indexed %v, want just a.txt", got)
+	}
+
+	// Naming the directory — or a file inside it — must not get around that.
+	for _, p := range []string{".qin", ".qin/config"} {
+		if got := indexedPaths(indexAfterAdd(t, r, p)); len(got) != 0 {
+			t.Fatalf("add %s indexed %v, want nothing", p, got)
+		}
+	}
+}
+
+// TestAddOSExprDoesNotEnterRepoMetadata covers the other walker, which needs
+// the same rule: runAdd picks between the two by whether an OS expression was
+// given.
+func TestAddOSExprDoesNotEnterRepoMetadata(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "a.txt", "hello")
+
+	idx := indexAfterAddOSExpr(t, r, ".")
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"a.txt"}) {
+		t.Fatalf("add --os . indexed %v, want just a.txt", got)
+	}
+	if e := entryAt(t, idx, "a.txt"); e.OSS != repo.CurrentOSID() {
+		t.Fatalf("a.txt OS mask = %d, want the --os mask %d", e.OSS, repo.CurrentOSID())
 	}
 }
 

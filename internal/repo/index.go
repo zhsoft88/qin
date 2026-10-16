@@ -307,6 +307,13 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 		return false, fmt.Errorf("path outside repository: %s", filePath)
 	}
 
+	// The walk skips .qin before it descends, so this is the rule's backstop
+	// rather than its usual site: it is what makes the invariant hold for every
+	// caller, not just the two that happen to walk a directory.
+	if IsRepoMetadataPath(filepath.ToSlash(relPath)) {
+		return false, fmt.Errorf("path inside %s cannot be tracked", LoDir)
+	}
+
 	fi, err := os.Lstat(absPath)
 	if err != nil {
 		return false, fmt.Errorf("lstat file: %w", err)

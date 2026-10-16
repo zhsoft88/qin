@@ -334,7 +334,10 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 				name = relDir + "/" + name
 			}
 			if relDir == "" {
-				if name == LoDir {
+				// The same rule the add walks apply — at the root, the entry's
+				// name is its whole repo-relative path — kept as one predicate
+				// so the two cannot drift.
+				if IsRepoMetadataPath(name) {
 					continue
 				}
 				if name == ".qinignore" {
