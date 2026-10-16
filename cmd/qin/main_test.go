@@ -139,6 +139,28 @@ func TestAddDoesNotFollowSymlinkToDir(t *testing.T) {
 	}
 }
 
+// TestAddOSExprTagsEmptyDir covers the one entry whose mask the walk cannot
+// read off a file: an empty directory. That branch hardcoded mask 0, so
+// `add --os` tagged an empty directory as the default variant — visible on
+// every platform — while the files next to it carried the requested mask.
+func TestAddOSExprTagsEmptyDir(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "pkg/thing.txt", "payload")
+	if err := os.MkdirAll(filepath.Join(dir, "pkg", "empty"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := indexAfterAddOSExpr(t, r, "pkg")
+
+	want := repo.CurrentOSID()
+	if e := entryAt(t, idx, "pkg/empty"); e.OSS != want {
+		t.Fatalf("empty dir OS mask = %d, want the --os mask %d", e.OSS, want)
+	}
+	if e := entryAt(t, idx, "pkg/thing.txt"); e.OSS != want {
+		t.Fatalf("file OS mask = %d, want the --os mask %d", e.OSS, want)
+	}
+}
+
 // TestAddStoresSymlinkToFile covers the case that already worked — the walk
 // took the file branch, because Stat resolves a link to a file to a non-dir —
 // so it is here to keep it working.

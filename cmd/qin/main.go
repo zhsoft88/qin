@@ -378,6 +378,20 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 // Lstat for the same reason as addFileOrDir: this walk does not follow
 // symlinks either.
 func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
+	// Derived once, before either branch: the expression is the same for every
+	// path this walk reaches, and the empty-directory branch below needs it as
+	// much as the file branch does. It used to hardcode mask 0 there, so
+	// `add --os` tagged an empty directory as the default variant — visible on
+	// every platform — while the files beside it carried the requested one.
+	var mask uint8
+	if expr != "" && expr != "*" {
+		inc, exc, err := repo.ParseOSExpr(expr)
+		if err != nil {
+			return fmt.Errorf("invalid OS expression: %w", err)
+		}
+		mask = repo.MaskFromOSExpr(inc, exc)
+	}
+
 	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
@@ -387,14 +401,6 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 			return nil
 		}
 
-		var mask uint8
-		if expr != "" && expr != "*" {
-			inc, exc, err := repo.ParseOSExpr(expr)
-			if err != nil {
-				return fmt.Errorf("invalid OS expression: %w", err)
-			}
-			mask = repo.MaskFromOSExpr(inc, exc)
-		}
 		changed, err := r.AddFileToIndex(path, mask, idx)
 		if err != nil {
 			return err
@@ -443,7 +449,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		return err
 	}
 	if len(entries) == 0 {
-		changed, err := r.AddFileToIndex(path, 0, idx)
+		changed, err := r.AddFileToIndex(path, mask, idx)
 		if err != nil {
 			return err
 		}
