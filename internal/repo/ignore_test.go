@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -135,8 +136,11 @@ func TestIgnoreStatusFiltering(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(s.Untracked) != 1 || s.Untracked[0] != "README.md" {
-		t.Fatalf("expected untracked [README.md], got %v", s.Untracked)
+	// .qinignore is untracked as well: it is qin's own ignore file, but that
+	// does not make it special to status, which used to hide it while `add .`
+	// tracked it like any other file.
+	if want := []string{".qinignore", "README.md"}; !reflect.DeepEqual(s.Untracked, want) {
+		t.Fatalf("untracked = %v, want %v", s.Untracked, want)
 	}
 }
 

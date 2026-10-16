@@ -295,8 +295,10 @@ func TestStatusIgnoredDirPruned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Untracked) != 0 {
-		t.Fatalf("expected 0 untracked (out/ ignored), got %v", s.Untracked)
+	// Everything under out/ is ignored; .qinignore is itself an ordinary
+	// untracked file, and status no longer hides it.
+	if want := []string{".qinignore"}; !reflect.DeepEqual(s.Untracked, want) {
+		t.Fatalf("untracked = %v, want %v (out/ is ignored)", s.Untracked, want)
 	}
 }
 
@@ -328,8 +330,8 @@ func TestStatusIgnoredDirWithNegate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Untracked) != 1 || s.Untracked[0] != "out/keep.txt" {
-		t.Fatalf("expected [out/keep.txt], got %v", s.Untracked)
+	if want := []string{".qinignore", "out/keep.txt"}; !reflect.DeepEqual(s.Untracked, want) {
+		t.Fatalf("untracked = %v, want %v", s.Untracked, want)
 	}
 }
 

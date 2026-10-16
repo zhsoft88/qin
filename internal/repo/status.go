@@ -350,10 +350,12 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 				// The same rule the add walks apply — at the root, the entry's
 				// name is its whole repo-relative path — kept as one predicate
 				// so the two cannot drift.
+				//
+				// .qinignore itself gets no case of its own. It was hidden here
+				// on the reasoning that qin's own ignore file is not something
+				// to report, but `add .` tracks it like any other file, so the
+				// two disagreed about a file the user can see in the directory.
 				if IsRepoMetadataPath(name) {
-					continue
-				}
-				if name == ".qinignore" {
 					continue
 				}
 			}
