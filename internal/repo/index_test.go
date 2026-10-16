@@ -839,3 +839,48 @@ func TestAddFileToIndexRefusesRepoMetadata(t *testing.T) {
 		t.Fatalf("index gained %d entries: %v", len(idx.Entries), idx.Entries)
 	}
 }
+
+// TestAddFileToIndexRefusesUnstorableName is the root-cause regression test:
+// the write path used to accept a name the read path cannot represent.
+//
+// The filesystem is more permissive than a tree entry. systemd escapes unit
+// names with a literal backslash, so a Linux checkout of chromium carries
+// src/build/linux/.../systemd/system/system-systemd\x2dcryptsetup.slice — a
+// legal filename, and one that safeRepoPath refuses, because on Windows that
+// same byte is a separator and a stored name has to mean one thing everywhere.
+//
+// Adding it does not fail at add time, which is the whole problem: LoadTree
+// validates every entry and rejects the entire tree over one bad name, so the
+// commit that carries it can never be read again. status stops comparing
+// against HEAD and push skips the tree — both of which look like success.
+func TestAddFileToIndexRefusesUnstorableName(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bad := `system-systemd\x2dcryptsetup.slice`
+	if err := ioutil.WriteFile(filepath.Join(repoDir, bad), []byte("unit"), 0644); err != nil {
+		t.Skipf("this filesystem cannot hold a name with a backslash: %v", err)
+	}
+
+	_, err = r.AddFileToIndex(filepath.Join(repoDir, bad), 0, idx)
+	if err == nil {
+		t.Fatal("AddFileToIndex accepted a name LoadTree can never read back")
+	}
+	// The message quotes the path with %q, so the backslash arrives escaped;
+	// the tail is what identifies the file either way.
+	if !strings.Contains(err.Error(), "x2dcryptsetup.slice") {
+		t.Errorf("error does not name the offending path: %v", err)
+	}
+	if len(idx.Entries) != 0 {
+		t.Fatalf("index gained %d entries: %v", len(idx.Entries), idx.Entries)
+	}
+
+	// The same name in slash form is what LoadTree would validate, and it is
+	// the same predicate: one definition, so the two cannot drift apart again.
+	if safeRepoPath(bad) {
+		t.Error("safeRepoPath accepts the name the add path just refused")
+	}
+}

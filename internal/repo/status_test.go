@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 func TestStatusClean(t *testing.T) {
@@ -1046,5 +1048,59 @@ func TestStatusSymlinkComparedByTarget(t *testing.T) {
 	}
 	if len(s.Modified) != 1 || s.Modified[0] != "link" {
 		t.Fatalf("Modified = %v, want [link] after repointing it", s.Modified)
+	}
+}
+
+// TestStatusRefusesUnreadableHEADSside pins the other half of the same defect
+// the push fix covers: a HEAD tree that will not load used to be swallowed by
+// an err == nil chain, and the erased comparison did not erase a line of
+// output — it made every index entry look staged. Reporting that as a clean
+// run is a wrong answer wearing the shape of a right one.
+func TestStatusRefusesUnreadableHEADSide(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A tree no consumer can read back: the name is a legal Linux filename but
+	// not one a tree entry can carry.
+	blob, err := r.StoreObject(core.ObjectBlob, []byte("unit"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeContent, err := core.SerializeJSON(&Tree{Entries: []TreeEntry{
+		{Name: `sys/system-systemd\x2dcryptsetup.slice`, Hash: blob, Size: 4, Mode: 0644},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeHash, err := r.StoreObject(core.ObjectTree, treeContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitContent, err := core.SerializeJSON(&Commit{Tree: treeHash, Author: "a", Message: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := r.StoreObject(core.ObjectCommit, commitContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetHEAD(commitHash.String()); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = r.WorkTreeStatus()
+	if err == nil {
+		t.Fatal("status reported a result it could not have computed")
+	}
+	if !strings.Contains(err.Error(), "x2dcryptsetup.slice") {
+		t.Errorf("the error does not name the entry that caused it: %v", err)
 	}
 }

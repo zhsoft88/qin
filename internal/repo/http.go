@@ -405,8 +405,7 @@ func (r *Repository) httpCollectMissingWithBoundary(baseURL string, hash core.Ha
 
 		commit, err := r.LoadCommit(h)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\rwarning: commit %s missing, skipping\n", h.Short())
-			return nil
+			return fmt.Errorf("cannot read commit %s: %w", h.Short(), err)
 		}
 
 		set[h] = true
@@ -437,8 +436,7 @@ func (r *Repository) collectTreeHTTPBoundary(baseURL string, set map[core.Hash]b
 
 	tree, err := r.LoadTree(treeHash)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\rwarning: tree %s missing, skipping\n", treeHash.Short())
-		return nil
+		return fmt.Errorf("cannot read tree %s: %w", treeHash.Short(), err)
 	}
 
 	set[treeHash] = true
@@ -450,9 +448,7 @@ func (r *Repository) collectTreeHTTPBoundary(baseURL string, set map[core.Hash]b
 
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
-			// Object missing locally — skip it
-			fmt.Fprintf(os.Stderr, "\rwarning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
-			continue
+			return fmt.Errorf("cannot read object %s (%s): %w", entry.Hash.Short(), entry.Name, err)
 		}
 
 		if objType == core.ObjectChunkManifest {

@@ -46,6 +46,14 @@ qin follows git's model: **a symlink is tracked as the link itself, never as its
 
 **Consequences that other code has to keep.** The index can never hold both `X` and `X/child` — `checkParentsNotSymlinks` exists to reject the second, since a hostile tree could otherwise write through a link to somewhere outside the repository. And `status` must compare a tracked link by *reading the link* (`os.Readlink`), not by reading through it: `entry.ContentHash` is the hash of the target string, so `ioutil.ReadFile` would hash whatever the link points at, and every tracked link to a file would be reported `modified` on every run. Links are also deliberately excluded from the stat fast path — a link's own `lstat` says nothing about its target, which can change without touching it.
 
+### Tree Entry Names
+
+A `TreeEntry.Name` is a repo-relative slash path, and **`safeRepoPath` is the one predicate** saying whether a name may be one. It is applied at both ends: `AddFileToIndex` checks it before a file is written to the index, and `LoadTree` checks it before a tree is read back. It refuses a name that is empty, absolute, holds a backslash, is Windows drive-relative (`C:foo`), or resolves outside the repository (`path.Clean`, so `a/../../x` is caught while `a..b` is untouched).
+
+The two disagree on purpose, and the gap is the whole point: **the filesystem is more permissive than a tree.** A backslash is an ordinary character in a Linux filename — systemd escapes unit names with it, so a chromium sysroot really does contain `system-systemd\x2dcryptsetup.slice` — and it is a separator on Windows, so a stored name has to mean one thing everywhere and therefore cannot contain it.
+
+Letting such a name in does not fail where it is added; it fails everywhere afterwards. `LoadTree` validates **every** entry and rejects the **whole** tree over one bad one, so the commit carrying it can never be read again: `status` has no HEAD to compare against (and every index entry then reads as staged — a wrong answer wearing the shape of a right one, so status now reports the unreadable HEAD instead), and `push` cannot collect the tree. The write-side refusal is the only point at which the user can still be told *which file* it is, which is why the guard sits at `add` rather than in the writer; for a tree already written, the read-side error names the entry, and that is the route back to the file. The `add` walks keep going past a file they cannot record — one untrackable file is no reason to stage nothing — but they return it, and `runAdd` exits non-zero: staging part of what was asked for and reporting success is the same shape as a push that moves nothing and exits 0.
+
 ### Large File Pipeline
 
 Files added via `add` go through `StoreChunkedFile()`:
@@ -62,6 +70,8 @@ Files added via `add` go through `StoreChunkedFile()`:
 - **SSH** — spawns `ssh` subprocess, runs `cat`/`cat >` commands on the remote for scp-style and `ssh://` URLs
 - Push uses `collectObjects` (DAG walk) + `copyObject` (atomic write + integrity check); Fetch does the reverse
 - `RepoServer` wraps multi-repo serving from a base directory
+
+**An object a walk cannot read is an error, never a skip.** `collectObjects`, `httpCollectMissingWithBoundary` and `sshCollectMissing` — and their tree walkers — all return on an unreadable commit, tree or entry, rather than `continue`. Skipping is what made a push move the ref while the objects it named never travelled: `warning: tree … missing, skipping`, then `pushed`, exit 0, and a remote whose `HEAD` pointed at a commit whose tree it did not have. Collection finishes before any object is copied and before any ref is written, so a collection error leaves zero partial state — the push fails and nothing has moved. The one deliberate skip is the `lazy` chunk skip, which is a mode decision signalled by a flag, not an error being swallowed.
 
 **Ref listings are keyed by full ref name**, whichever transport produced them: `refs/heads/main`, never `heads/main` or bare `main`. `branchNamesFromRefs` is the one extractor and every listing funnels through it, because a mismatch here fails silently in the worst way — the SSH listing once keyed its map relative to `.qin/refs`, so both callers' `refs/heads/` filter matched nothing, and SSH fetch took no objects while SSH clone produced an empty repository, every command exiting 0. `sshRefKey` is the SSH producer's half of that contract, and `ssh_test.go` pins it without needing an SSH server.
 

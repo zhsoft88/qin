@@ -109,49 +109,62 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 
 	// Remove entries that match HEAD's tree (already committed), and find the
 	// paths HEAD has that the index does not.
+	//
+	// These failures used to be absorbed by an err == nil chain, and the result
+	// was not a missing line of output: with no tree to compare against, no
+	// index entry matches and every one of them is reported as staged, while
+	// every deletion vanishes. That is a wrong answer wearing the shape of a
+	// right one, so an unreadable HEAD is reported instead. An *empty* HEAD is
+	// not an error — that is a repository with no commits yet, where there is
+	// genuinely nothing to compare against.
 	if headHashStr, err := r.ResolveHEAD(); err == nil && headHashStr != "" {
-		if h, err := core.HashFromHex(headHashStr); err == nil {
-			if commit, err := r.LoadCommit(h); err == nil {
-				if tree, err := r.LoadTree(commit.Tree); err == nil {
-					treeMap := make(map[string]TreeEntry, len(tree.Entries))
-					for _, te := range tree.Entries {
-						treeMap[entryKey(te.Name, te.OSS)] = te
-					}
-					for path, entry := range visible {
-						if te, ok := treeMap[entryKey(path, entry.OSS)]; ok && te.Hash == entry.Hash {
-							delete(visible, path)
-						}
-					}
+		h, err := core.HashFromHex(headHashStr)
+		if err != nil {
+			return nil, fmt.Errorf("HEAD is not a commit hash: %q", headHashStr)
+		}
+		commit, err := r.LoadCommit(h)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read HEAD commit %s: %w", h.Short(), err)
+		}
+		tree, err := r.LoadTree(commit.Tree)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read HEAD's tree %s: %w", commit.Tree.Short(), err)
+		}
 
-					// The mirror image of a staged add, and invisible to every
-					// map above: Staged is built from index keys, and Modified
-					// and Deleted both iterate index-derived paths. Nothing
-					// else enumerates the HEAD tree, so this loop is the only
-					// place the paths can be seen.
-					seen := make(map[string]bool, len(tree.Entries))
-					for _, te := range tree.Entries {
-						if include == nil && exclude == nil {
-							if !osMatch(te.OSS, currentOS()) {
-								continue
-							}
-						} else if !MatchOSExpr(te.OSS, include, exclude) {
-							continue
-						}
-						// By name, not by composite key: a path HEAD stores as
-						// a default variant (OSS 0) and the index stores as an
-						// OS-specific one is still tracked, and entryKey would
-						// call it deleted.
-						if _, ok := allVisible[te.Name]; ok {
-							continue
-						}
-						if seen[te.Name] {
-							continue // one report per path, however many variants
-						}
-						seen[te.Name] = true
-						s.StagedDeleted = append(s.StagedDeleted, te.Name)
-					}
-				}
+		treeMap := make(map[string]TreeEntry, len(tree.Entries))
+		for _, te := range tree.Entries {
+			treeMap[entryKey(te.Name, te.OSS)] = te
+		}
+		for path, entry := range visible {
+			if te, ok := treeMap[entryKey(path, entry.OSS)]; ok && te.Hash == entry.Hash {
+				delete(visible, path)
 			}
+		}
+
+		// The mirror image of a staged add, and invisible to every map above:
+		// Staged is built from index keys, and Modified and Deleted both
+		// iterate index-derived paths. Nothing else enumerates the HEAD tree,
+		// so this loop is the only place the paths can be seen.
+		seen := make(map[string]bool, len(tree.Entries))
+		for _, te := range tree.Entries {
+			if include == nil && exclude == nil {
+				if !osMatch(te.OSS, currentOS()) {
+					continue
+				}
+			} else if !MatchOSExpr(te.OSS, include, exclude) {
+				continue
+			}
+			// By name, not by composite key: a path HEAD stores as a default
+			// variant (OSS 0) and the index stores as an OS-specific one is
+			// still tracked, and entryKey would call it deleted.
+			if _, ok := allVisible[te.Name]; ok {
+				continue
+			}
+			if seen[te.Name] {
+				continue // one report per path, however many variants
+			}
+			seen[te.Name] = true
+			s.StagedDeleted = append(s.StagedDeleted, te.Name)
 		}
 	}
 

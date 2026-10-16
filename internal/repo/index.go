@@ -307,11 +307,28 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 		return false, fmt.Errorf("path outside repository: %s", filePath)
 	}
 
+	relFormatted := filepath.ToSlash(relPath)
+
 	// The walk skips .qin before it descends, so this is the rule's backstop
 	// rather than its usual site: it is what makes the invariant hold for every
 	// caller, not just the two that happen to walk a directory.
-	if IsRepoMetadataPath(filepath.ToSlash(relPath)) {
+	if IsRepoMetadataPath(relFormatted) {
 		return false, fmt.Errorf("path inside %s cannot be tracked", LoDir)
+	}
+
+	// The name must satisfy the same rule LoadTree validates entries with, and
+	// it has to be checked here because the filesystem is more permissive than
+	// a tree: a name holding a backslash is an ordinary Linux filename — systemd
+	// escapes unit names that way, so chromium's sysroot really contains
+	// system-systemd\x2dcryptsetup.slice — but it cannot be a tree entry.
+	//
+	// Letting one in does not fail at add time, which is the whole problem. It
+	// makes the commit containing it permanently unreadable: LoadTree rejects
+	// the *whole* tree over one bad name, so status stops comparing against
+	// HEAD, and push skips the tree and reports success. Refusing the file here
+	// is the only point at which the user can still be told which one it is.
+	if !safeRepoPath(relFormatted) {
+		return false, fmt.Errorf("cannot store %q: not a valid tree entry name", relFormatted)
 	}
 
 	fi, err := os.Lstat(absPath)
@@ -327,7 +344,7 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 		if !empty {
 			return false, fmt.Errorf("cannot add non-empty directory: %s", filePath)
 		}
-		key := entryKey(filepath.ToSlash(relPath), oss)
+		key := entryKey(relFormatted, oss)
 		if e, ok := idx.Entries[key]; ok && e.Mode == DirMode {
 			return false, nil // unchanged — already in the index
 		}
@@ -343,7 +360,6 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 	if err != nil {
 		return false, err
 	}
-	relFormatted := filepath.ToSlash(relPath)
 	if ignorer.Match(relFormatted, false) {
 		return false, fmt.Errorf("matches .qinignore")
 	}

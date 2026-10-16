@@ -235,15 +235,19 @@ func runAdd(args []string) error {
 		return err
 	}
 	added := 0
+	failed := 0
 	for _, f := range args {
+		var err error
 		if useOSExpr != "" {
-			if err := addFileOrDirExpr(r, f, useOSExpr, excludeFlags, &added, idx, ignorer); err != nil {
-				fmt.Fprintf(os.Stderr, "add %s: %v\n", f, err)
-			}
+			err = addFileOrDirExpr(r, f, useOSExpr, excludeFlags, &added, idx, ignorer)
 		} else {
-			if err := addFileOrDir(r, f, excludeFlags, &added, idx, ignorer); err != nil {
-				fmt.Fprintf(os.Stderr, "add %s: %v\n", f, err)
-			}
+			err = addFileOrDir(r, f, excludeFlags, &added, idx, ignorer)
+		}
+		if err != nil {
+			// Report every failing path rather than stopping at the first, so
+			// one bad argument does not hide the others.
+			fmt.Fprintf(os.Stderr, "add %s: %v\n", f, err)
+			failed++
 		}
 	}
 	if added > 0 {
@@ -252,6 +256,13 @@ func runAdd(args []string) error {
 		}
 		clearLine()
 		fmt.Printf("added %d file(s)\n", added)
+	}
+	// Whatever was staged is kept — re-running after the fix is cheap — but the
+	// exit status has to say that something asked for did not happen. Staging
+	// part of what the user named and reporting success is the same shape as a
+	// push that moves no objects and exits 0.
+	if failed > 0 {
+		return fmt.Errorf("%d path(s) could not be added", failed)
 	}
 	return nil
 }
@@ -364,6 +375,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		fmt.Fprintf(os.Stdout, dPre+"%d] %-*s"+dSuf, *added, max, display)
 		return nil
 	}
+	var firstErr error
 	for _, entry := range entries {
 		childPath := filepath.Join(path, entry.Name())
 		if entry.IsDir() {
@@ -373,11 +385,16 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 				continue
 			}
 		}
-		if err := addFileOrDir(r, childPath, excludes, added, idx, ignorer); err != nil {
-			fmt.Fprintf(os.Stderr, "add %s: %v\n", childPath, err)
+		// A child that cannot be recorded is not fatal — one untrackable file
+		// is no reason to stage nothing, so the walk goes on — but it is not
+		// silent either. The first one is returned for runAdd to turn into a
+		// non-zero exit: skipping a file and reporting success is how an
+		// unstorable name reached a commit before anyone noticed.
+		if err := addFileOrDir(r, childPath, excludes, added, idx, ignorer); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
@@ -497,6 +514,10 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 		fmt.Fprintf(os.Stdout, dPre+"%d] %-*s"+dSuf, *added, max, display)
 		return nil
 	}
+	// See addFileOrDir: a child that cannot be recorded is skipped so the rest
+	// of the directory still lands, and the first failure is returned so runAdd
+	// can exit non-zero.
+	var firstErr error
 	for _, entry := range entries {
 		childPath := filepath.Join(path, entry.Name())
 		if entry.IsDir() {
@@ -506,11 +527,11 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 				continue
 			}
 		}
-		if err := addFileOrDirExpr(r, childPath, expr, excludes, added, idx, ignorer); err != nil {
-			fmt.Fprintf(os.Stderr, "add %s: %v\n", childPath, err)
+		if err := addFileOrDirExpr(r, childPath, expr, excludes, added, idx, ignorer); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // skipRepoMetadata prints a skip line and reports true when path lies inside

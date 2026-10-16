@@ -1493,3 +1493,81 @@ func TestHeadBranchFromHEAD(t *testing.T) {
 		}
 	}
 }
+
+// TestPushRefusesMissingTree is the regression test for a push that trimmed
+// itself down to what it could read and then said "pushed".
+//
+// Every walk that collects objects to move used to print "warning: tree ...
+// missing, skipping" and return nil. Collection finishes before the first
+// object is copied and before the ref is written, so what reached the target
+// was a branch pointing at a commit whose tree it did not have — a repository
+// that looks pushed and cannot be checked out. An object the walk cannot read
+// has to fail the push instead.
+func TestPushRefusesMissingTree(t *testing.T) {
+	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(remoteDir)
+	localDir, err := ioutil.TempDir("", "lo-local-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(localDir)
+
+	if _, err := InitBare(remoteDir); err != nil {
+		t.Fatal(err)
+	}
+	local, err := Init(localDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(localDir, "f.txt"), []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := local.AddFile(filepath.Join(localDir, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := local.WriteCommit("Test", "commit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := local.SaveRemote("origin", remoteDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Damage the local store the way a name it cannot store damages it: the
+	// commit is there, the tree it names is not.
+	commit, err := local.LoadCommit(commitHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(local.objectPath(commit.Tree)); err != nil {
+		t.Fatal(err)
+	}
+
+	err = local.Push("origin", false)
+	if err == nil {
+		t.Fatal("push reported success with the commit's tree missing")
+	}
+	if !strings.Contains(err.Error(), commit.Tree.Short()) {
+		t.Errorf("error does not name the unreadable tree: %v", err)
+	}
+
+	// A push that cannot move everything must move nothing — the ref is what
+	// would make the target look complete.
+	remote, err := Open(remoteDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hashStr, err := remote.ReadRef("refs/heads/main"); err == nil {
+		t.Errorf("failed push wrote the target's ref: %s", hashStr)
+	}
+	objects, err := remote.enumerateAllObjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 0 {
+		t.Errorf("failed push left %d objects on the target", len(objects))
+	}
+}

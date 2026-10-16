@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -538,5 +539,54 @@ func TestTreeEntryReplacingSymlinkCannotEscapeRepo(t *testing.T) {
 	}
 	if string(content) != "PWNED" {
 		t.Fatalf("entry not written: got %q, want %q", content, "PWNED")
+	}
+}
+
+// TestLoadTreeRejectsUnstorableName is the read half of the name rule the add
+// path now enforces at write time.
+//
+// A tree that already carries such a name — one written before the guard
+// existed — must fail to load, because every consumer joins these names onto
+// the working tree root and a backslash is a separator on Windows. The check
+// is per-entry and fails the whole tree, which is exactly why the name cannot
+// be allowed to accumulate in the first place. The message has to name the
+// entry: for a tree already written, it is the only route back to the file.
+func TestLoadTreeRejectsUnstorableName(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte("unit")
+	blob, err := r.StoreObject(core.ObjectBlob, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	name := `sys/system-systemd\x2dcryptsetup.slice`
+	tree := &Tree{Entries: []TreeEntry{
+		{Name: name, Hash: blob, Size: int64(len(payload)), Mode: 0644},
+	}}
+	content, err := core.SerializeJSON(tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := r.StoreObject(core.ObjectTree, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = r.LoadTree(hash)
+	if err == nil {
+		t.Fatal("LoadTree accepted an entry name no tree can carry")
+	}
+	if !strings.Contains(err.Error(), "x2dcryptsetup.slice") {
+		t.Errorf("LoadTree's error does not name the entry: %v", err)
 	}
 }

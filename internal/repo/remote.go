@@ -238,6 +238,14 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 // hashes (commits, trees, blobs, chunk manifests, chunks) that are NOT
 // already present in boundary. Stops recursing at objects boundary has.
 // When lazy is true, chunk blob hashes are skipped (only manifests are collected).
+//
+// An object this walk cannot read is an error, never a skip. Skipping one
+// still let the ref be written — the objects are copied and then the ref moves,
+// so the remote ended up with a branch pointing at a commit whose tree it did
+// not have, and the push said "pushed". A transfer that cannot name everything
+// it must move has to fail before it moves anything, which is also what keeps
+// a failed push free of partial state: the collection is complete before the
+// first object is copied.
 func (r *Repository) collectObjects(boundary *Repository, hash core.Hash, lazy bool) (map[core.Hash]bool, error) {
 	set := make(map[core.Hash]bool)
 	visited := make(map[core.Hash]bool) // DAG cycle detection
@@ -255,8 +263,7 @@ func (r *Repository) collectObjects(boundary *Repository, hash core.Hash, lazy b
 
 		commit, err := r.LoadCommit(h)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "\rwarning: commit %s missing, skipping\n", h.Short())
-			return nil
+			return fmt.Errorf("cannot read commit %s: %w", h.Short(), err)
 		}
 
 		set[h] = true
@@ -288,8 +295,7 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 
 	tree, err := r.LoadTree(treeHash)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\rwarning: tree %s missing, skipping\n", treeHash.Short())
-		return nil
+		return fmt.Errorf("cannot read tree %s: %w", treeHash.Short(), err)
 	}
 
 	set[treeHash] = true
@@ -306,9 +312,7 @@ func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool
 
 		objType, err := r.ObjectType(entry.Hash)
 		if err != nil {
-			// Object missing locally — skip it
-			fmt.Fprintf(os.Stderr, "\rwarning: object %s (%s) missing, skipping\n", entry.Hash.Short(), entry.Name)
-			continue
+			return fmt.Errorf("cannot read object %s (%s): %w", entry.Hash.Short(), entry.Name, err)
 		}
 
 		if objType == core.ObjectChunkManifest {

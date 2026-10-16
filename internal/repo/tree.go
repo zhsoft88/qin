@@ -95,12 +95,17 @@ func (r *Repository) LoadTree(hash core.Hash) (*Tree, error) {
 	// here, at the one point every consumer reads trees through, so hostile
 	// data cannot reach a filesystem write at all.
 	//
-	// qin only ever writes trees built from index keys, which are canonical
-	// repo-relative slash paths, so a name failing this check did not come
-	// from qin's own writer — it is a hand-crafted or corrupted object.
+	// safeRepoPath refuses more than escaping, and the whole tree goes down
+	// with the one bad name: a name holding a backslash is a legal Linux
+	// filename — systemd escapes unit names that way — but not one a tree can
+	// carry, since the same byte separates on Windows. That is why add refuses
+	// such a file rather than storing it: a tree written with one in it can
+	// never be read back, so the commit holding it is unreachable to every
+	// command that compares against HEAD. The error names the entry, which is
+	// the only way back to the file for a tree already written.
 	for i := range tree.Entries {
 		if !safeRepoPath(tree.Entries[i].Name) {
-			return nil, fmt.Errorf("tree %s contains a path outside the repository: %q",
+			return nil, fmt.Errorf("tree %s: entry %q is not a valid tree entry name",
 				hash.Short(), tree.Entries[i].Name)
 		}
 	}
