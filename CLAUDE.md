@@ -54,6 +54,8 @@ The two disagree on purpose, and the gap is the whole point: **the filesystem is
 
 Letting such a name in does not fail where it is added; it fails everywhere afterwards. `LoadTree` validates **every** entry and rejects the **whole** tree over one bad one, so the commit carrying it can never be read again: `status` has no HEAD to compare against (and every index entry then reads as staged — a wrong answer wearing the shape of a right one, so status now reports the unreadable HEAD instead), and `push` cannot collect the tree. The write-side refusal is the only point at which the user can still be told *which file* it is, which is why the guard sits at `add` rather than in the writer; for a tree already written, the read-side error names the entry, and that is the route back to the file. The `add` walks keep going past a file they cannot record — one untrackable file is no reason to stage nothing — but they return it, and `runAdd` exits non-zero: staging part of what was asked for and reporting success is the same shape as a push that moves nothing and exits 0.
 
+That refusal needs a quiet answer, so `AddFileToIndex` consults `.qinignore` **before** the name rule: a path that is not being added has no name for the tree rule to judge. Otherwise the only escapes are deleting a file that belongs on disk or naming it on every invocation, and `qin add .` in such a tree fails forever. The ignore refusal is `ErrIgnored`, an error so that `add <path>` names it but one the walks subtract with `errors.Is` — a file a walk passes over because it is ignored has not failed, and counting it as one would turn every repository holding a `.qinignore` into a failing `qin add .`.
+
 ### Large File Pipeline
 
 Files added via `add` go through `StoreChunkedFile()`:

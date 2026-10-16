@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/zhsoft88/qin/internal/core"
@@ -390,7 +391,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		// silent either. The first one is returned for runAdd to turn into a
 		// non-zero exit: skipping a file and reporting success is how an
 		// unstorable name reached a commit before anyone noticed.
-		if err := addFileOrDir(r, childPath, excludes, added, idx, ignorer); err != nil && firstErr == nil {
+		if err := addFileOrDir(r, childPath, excludes, added, idx, ignorer); err != nil && !errors.Is(err, repo.ErrIgnored) && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -527,7 +528,7 @@ func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, 
 				continue
 			}
 		}
-		if err := addFileOrDirExpr(r, childPath, expr, excludes, added, idx, ignorer); err != nil && firstErr == nil {
+		if err := addFileOrDirExpr(r, childPath, expr, excludes, added, idx, ignorer); err != nil && !errors.Is(err, repo.ErrIgnored) && firstErr == nil {
 			firstErr = err
 		}
 	}

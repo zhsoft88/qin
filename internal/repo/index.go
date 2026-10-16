@@ -75,6 +75,13 @@ func writeFileFromEntry(path string, data []byte, mode uint32) error {
 // a platform cannot represent — must not tolerate this one.
 var errOutsideWorkTree = errors.New("path outside repository")
 
+// ErrIgnored marks a path the .qinignore rules exclude. It is an error rather
+// than a plain skip so that `add <path>` names it, but the walks treat it as
+// the ordinary outcome it is: a file a walk passes over because it is ignored
+// has not failed, and an add that reported it as one would turn every
+// repository carrying a .qinignore into a failing `qin add .`.
+var ErrIgnored = errors.New("matches .qinignore")
+
 // checkParentsNotSymlinks rejects a target whose existing parent directories
 // below root include a symlink. Path syntax alone cannot rule this out: a
 // tree may legitimately carry a symlink entry, so a later entry named
@@ -316,6 +323,19 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 		return false, fmt.Errorf("path inside %s cannot be tracked", LoDir)
 	}
 
+	// The ignore rules are consulted first, and that order is the point: a path
+	// that is not being added has no name for the tree rule to judge. It is what
+	// makes .qinignore the remedy for a file whose name a tree can never carry —
+	// the file is on disk, the walk will keep reaching it, and ignoring it is the
+	// only way to say "not this one" without deleting it.
+	ignorer, err := r.LoadIgnoreMatcher()
+	if err != nil {
+		return false, err
+	}
+	if ignorer.Match(relFormatted, false) {
+		return false, ErrIgnored
+	}
+
 	// The name must satisfy the same rule LoadTree validates entries with, and
 	// it has to be checked here because the filesystem is more permissive than
 	// a tree: a name holding a backslash is an ordinary Linux filename — systemd
@@ -354,14 +374,6 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 			OSS:   oss,
 		}
 		return true, nil
-	}
-
-	ignorer, err := r.LoadIgnoreMatcher()
-	if err != nil {
-		return false, err
-	}
-	if ignorer.Match(relFormatted, false) {
-		return false, fmt.Errorf("matches .qinignore")
 	}
 
 	var data []byte

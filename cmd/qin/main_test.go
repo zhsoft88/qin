@@ -321,3 +321,39 @@ func TestAddRefusesUnstorableName(t *testing.T) {
 		t.Fatalf("indexed = %v, want [ok.slice]", got)
 	}
 }
+
+// TestAddSkipsIgnoredUnstorableName pins the remedy, and the ordering it rests
+// on: the ignore rules are consulted before the name rule, so a file a tree can
+// never hold is one .qinignore can silence.
+//
+// Without that order the failure has no quiet answer — the file is on disk and
+// every walk keeps reaching it — so the only ways out are deleting it or naming
+// it on every invocation, and `qin add .` in such a tree fails forever. A path
+// that is not being added has no name for the tree rule to judge.
+func TestAddSkipsIgnoredUnstorableName(t *testing.T) {
+	r, dir := newAddRepo(t)
+
+	bad := `system-systemd\x2dcryptsetup.slice`
+	if err := ioutil.WriteFile(filepath.Join(dir, bad), []byte("unit"), 0644); err != nil {
+		t.Skipf("this filesystem cannot hold a name with a backslash: %v", err)
+	}
+	writeAt(t, dir, "ok.slice", "fine")
+	writeAt(t, dir, ".qinignore", "system-systemd*\n")
+
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ignorer, err := r.LoadIgnoreMatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	added := 0
+	if err := addFileOrDir(r, dir, nil, &added, idx, ignorer); err != nil {
+		t.Fatalf("an ignored file is a skip, not a failure: %v", err)
+	}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{".qinignore", "ok.slice"}) {
+		t.Fatalf("indexed = %v, want [.qinignore ok.slice]", got)
+	}
+}
