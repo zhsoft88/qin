@@ -257,8 +257,14 @@ func runAdd(args []string) error {
 }
 
 // addFileOrDir adds a file or directory recursively (default OS).
+//
+// Symlinks are never followed, whatever they point at: Lstat here, and the
+// leaf AddFileToIndex stores the link itself. Stat would resolve a link to a
+// directory and this walk would then record the target's contents under the
+// link's path — the link would never be recorded, and status, which reads
+// dirents with Lstat semantics, would report it untracked forever.
 func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
-	fi, err := os.Stat(path)
+	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
@@ -368,8 +374,11 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 }
 
 // addFileOrDirExpr adds a file or directory recursively with an OS expression.
+//
+// Lstat for the same reason as addFileOrDir: this walk does not follow
+// symlinks either.
 func addFileOrDirExpr(r *repo.Repository, path, expr string, excludes []string, added *int, idx *repo.Index, ignorer *repo.IgnoreMatcher) error {
-	fi, err := os.Stat(path)
+	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}

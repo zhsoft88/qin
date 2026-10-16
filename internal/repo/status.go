@@ -235,9 +235,23 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 			entry.Mtime < idxMtime {
 			continue
 		}
-		data, err := ioutil.ReadFile(fullPath)
-		if err != nil {
-			continue
+		// A symlink is stored as a blob holding its target string (see
+		// AddFileToIndex), so it has to be read back as a link. ReadFile would
+		// follow it and hash whatever it points at — a link to a file would be
+		// reported modified on every run, and one to a directory escaped that
+		// only because ReadFile fails on a directory.
+		var data []byte
+		if IsSymlinkMode(entry.Mode) {
+			target, err := os.Readlink(fullPath)
+			if err != nil {
+				continue
+			}
+			data = []byte(target)
+		} else {
+			data, err = ioutil.ReadFile(fullPath)
+			if err != nil {
+				continue
+			}
 		}
 		contentHash := core.HashFromBytes(data)
 		if contentHash != entry.ContentHash {

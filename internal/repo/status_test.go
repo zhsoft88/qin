@@ -991,3 +991,60 @@ func TestStatusStagedDeletionInBareTarget(t *testing.T) {
 	}
 	t.Fatalf("diff --cached does not report a.txt as deleted: %+v", diff.Files)
 }
+
+// TestStatusSymlinkComparedByTarget: a symlink is stored as a blob holding its
+// target string, so status has to read the link back to compare it. Reading
+// *through* it — ioutil.ReadFile — hashes the target file's contents against
+// that string and reports the link modified on every single run. A link to a
+// directory escaped only because ReadFile fails on a directory.
+func TestStatusSymlinkComparedByTarget(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	target := filepath.Join(repoDir, "target.txt")
+	if err := ioutil.WriteFile(target, []byte("alphabet"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(repoDir, "link")
+	if err := os.Symlink("target.txt", link); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddFileToIndex(link, 0, idx); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := r.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Modified) != 0 {
+		t.Fatalf("Modified = %v, want empty: the link is unchanged", s.Modified)
+	}
+	for _, p := range s.Untracked {
+		if p == "link" {
+			t.Fatalf("Untracked = %v, want the tracked link left out", s.Untracked)
+		}
+	}
+
+	// The control: repointing the link is a real change, and silence would not
+	// be a fix.
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("elsewhere", link); err != nil {
+		t.Fatal(err)
+	}
+	s, err = r.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Modified) != 1 || s.Modified[0] != "link" {
+		t.Fatalf("Modified = %v, want [link] after repointing it", s.Modified)
+	}
+}

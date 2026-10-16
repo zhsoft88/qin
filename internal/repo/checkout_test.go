@@ -4,6 +4,8 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -228,6 +230,99 @@ func TestResolveRefShortHash(t *testing.T) {
 	}
 	if resolved != h {
 		t.Fatalf("expected %s, got %s", h, resolved)
+	}
+}
+
+// TestCheckoutRestoresSymlink is the round trip for the shape add now records:
+// a link comes back as a link, and the directory it points at is not duplicated
+// alongside it.
+//
+// The second half is the point of the test. A walk that followed the link would
+// have committed the target's contents under the link's path, and this restore
+// would then produce two copies of a tree that exists once — the duplication
+// would survive checkout, and nothing downstream could tell it apart from real
+// content.
+func TestCheckoutRestoresSymlink(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	written := filepath.Join(dir, "pkg", "real", "thing.txt")
+	if err := os.MkdirAll(filepath.Dir(written), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(written, []byte("payload"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "pkg", "_current")
+	if err := os.Symlink("real", link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.AddFile(written); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFile(link); err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := r.WriteCommit("Test", "links")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Wipe the worktree, so everything that comes back comes from the commit.
+	if err := os.RemoveAll(filepath.Join(dir, "pkg")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Checkout(commitHash); err != nil {
+		t.Fatal(err)
+	}
+
+	fi, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("_current was not restored: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("_current restored as mode %v, want a symlink", fi.Mode())
+	}
+	target, err := os.Readlink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "real" {
+		t.Fatalf("link target = %q, want %q", target, "real")
+	}
+	// Reading through the link reaches the real file. That is only meaningful
+	// together with the Lstat above: it rules out a copy holding the same bytes
+	// in a directory that happens to be named _current.
+	data, err := ioutil.ReadFile(filepath.Join(link, "thing.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "payload" {
+		t.Fatalf("thing.txt through the link = %q, want %q", data, "payload")
+	}
+
+	// Both paths, once each: no entry under the link's path.
+	files, err := r.ListFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for name := range files {
+		got = append(got, name)
+	}
+	sort.Strings(got)
+	want := []string{"pkg/_current", "pkg/real/thing.txt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("index after checkout = %v, want %v", got, want)
 	}
 }
 
