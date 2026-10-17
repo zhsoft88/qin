@@ -4,7 +4,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -244,13 +243,15 @@ func TestWriteCommitNothingStaged(t *testing.T) {
 // names onto the working tree root, so a name with "../" is remote input that
 // would otherwise be written outside the repository.
 func TestHostileTreeCannotEscapeRepo(t *testing.T) {
+	// `..\..\victim.txt` and `C:victim.txt` are deliberately absent: on Linux
+	// the first is one legal filename holding a backslash and the second is a
+	// legal filename too, so a tree may carry both. They escape only under
+	// Windows' path syntax, which is where hostPathError judges them.
 	for _, name := range []string{
 		"../victim.txt",
 		"../../victim.txt",
 		"a/../../victim.txt",
-		`..\..\victim.txt`,
 		"/tmp/victim.txt",
-		"C:victim.txt",
 		"..",
 	} {
 		name := name
@@ -542,16 +543,11 @@ func TestTreeEntryReplacingSymlinkCannotEscapeRepo(t *testing.T) {
 	}
 }
 
-// TestLoadTreeRejectsUnstorableName is the read half of the name rule the add
-// path now enforces at write time.
-//
-// A tree that already carries such a name — one written before the guard
-// existed — must fail to load, because every consumer joins these names onto
-// the working tree root and a backslash is a separator on Windows. The check
-// is per-entry and fails the whole tree, which is exactly why the name cannot
-// be allowed to accumulate in the first place. The message has to name the
-// entry: for a tree already written, it is the only route back to the file.
-func TestLoadTreeRejectsUnstorableName(t *testing.T) {
+// TestLoadTreeAcceptsBackslashName is the read half of the same rule: a tree
+// entry name may be any legal filename, so a Linux tree carrying systemd's
+// escaped unit names loads intact. The name has to survive byte-for-byte —
+// every platform that can create it must be able to get it back exactly.
+func TestLoadTreeAcceptsBackslashName(t *testing.T) {
 	dir, err := ioutil.TempDir("", "lo-test-*")
 	if err != nil {
 		t.Fatal(err)
@@ -582,11 +578,11 @@ func TestLoadTreeRejectsUnstorableName(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = r.LoadTree(hash)
-	if err == nil {
-		t.Fatal("LoadTree accepted an entry name no tree can carry")
+	loaded, err := r.LoadTree(hash)
+	if err != nil {
+		t.Fatalf("LoadTree refused a legal filename: %v", err)
 	}
-	if !strings.Contains(err.Error(), "x2dcryptsetup.slice") {
-		t.Errorf("LoadTree's error does not name the entry: %v", err)
+	if len(loaded.Entries) != 1 || loaded.Entries[0].Name != name {
+		t.Fatalf("entry name changed in transit: %q", loaded.Entries)
 	}
 }

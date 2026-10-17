@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/zhsoft88/qin/internal/repo"
@@ -277,60 +276,35 @@ func TestAddWithoutOSExprDoesNotFollowSymlinks(t *testing.T) {
 	}
 }
 
-// TestAddRefusesUnstorableName drives the real walk over a tree holding a name
-// no tree can hold. The walk must refuse it and say which file it is — the
-// alternative, letting it into the index, is what produced a commit whose tree
-// could never be read again: LoadTree validates every entry and rejects the
-// whole tree over one bad name, so status stopped comparing against HEAD and
-// push skipped the tree and reported success.
-func TestAddRefusesUnstorableName(t *testing.T) {
+// TestAddStoresBackslashName drives the real walk over a name that is legal on
+// this platform. The filesystem is the source of truth: anything it holds has
+// to be storable. Refusing such a name made a Linux checkout of chromium
+// impossible to add, and the answer belongs at the platform that cannot create
+// it, not in a rule applied everywhere.
+func TestAddStoresBackslashName(t *testing.T) {
 	r, dir := newAddRepo(t)
 
 	// systemd escapes unit names with a literal backslash, so a Linux checkout
-	// of chromium really contains this file. It is a legal name on Linux and
-	// not one on Windows, which is why a tree entry has to refuse it.
-	bad := `system-systemd\x2dcryptsetup.slice`
-	if err := ioutil.WriteFile(filepath.Join(dir, bad), []byte("unit"), 0644); err != nil {
+	// of chromium really contains this file.
+	name := `system-systemd\x2dcryptsetup.slice`
+	if err := ioutil.WriteFile(filepath.Join(dir, name), []byte("unit"), 0644); err != nil {
 		t.Skipf("this filesystem cannot hold a name with a backslash: %v", err)
 	}
-	// Sorts before the bad name, so ReadDir visits it first: one unstorable
-	// file must not cost the user the rest of the directory.
 	writeAt(t, dir, "ok.slice", "fine")
 
-	idx, err := r.LoadIndex()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ignorer, err := r.LoadIgnoreMatcher()
-	if err != nil {
-		t.Fatal(err)
-	}
+	idx := indexAfterAdd(t, r, ".")
 
-	added := 0
-	err = addFileOrDir(r, dir, nil, &added, idx, ignorer)
-	if err == nil {
-		t.Fatal("the walk accepted a name no tree can hold")
-	}
-	if !strings.Contains(err.Error(), "x2dcryptsetup.slice") {
-		t.Errorf("the walk's error does not name the file: %v", err)
-	}
-	// Refusing the file must not cost the user the rest of the directory, and
-	// returning the error must not be the only trace of it — runAdd turns it
-	// into a non-zero exit so the skip cannot be mistaken for success.
-	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"ok.slice"}) {
-		t.Fatalf("indexed = %v, want [ok.slice]", got)
+	want := []string{"ok.slice", name}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, want) {
+		t.Fatalf("indexed %v, want %v", got, want)
 	}
 }
 
-// TestAddSkipsIgnoredUnstorableName pins the remedy, and the ordering it rests
-// on: the ignore rules are consulted before the name rule, so a file a tree can
-// never hold is one .qinignore can silence.
-//
-// Without that order the failure has no quiet answer — the file is on disk and
-// every walk keeps reaching it — so the only ways out are deleting it or naming
-// it on every invocation, and `qin add .` in such a tree fails forever. A path
-// that is not being added has no name for the tree rule to judge.
-func TestAddSkipsIgnoredUnstorableName(t *testing.T) {
+// TestAddSkipsIgnoredName: an ignored path is a skip, not a failure. The walks
+// subtract ErrIgnored with errors.Is, so `qin add .` in a tree carrying a
+// .qinignore exits 0; counting skips as failures would make every such
+// repository unaddable.
+func TestAddSkipsIgnoredName(t *testing.T) {
 	r, dir := newAddRepo(t)
 
 	bad := `system-systemd\x2dcryptsetup.slice`

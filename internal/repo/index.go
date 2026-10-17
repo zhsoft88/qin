@@ -38,25 +38,33 @@ func isOutsideRepo(rel string) bool {
 // must stay inside the repository: filepath.Join resolves ".." silently, so
 // an unchecked "../../x" writes outside the working tree.
 //
-// The check is deliberately platform-independent rather than delegating to
-// filepath, which interprets only the host OS's separator. Paths are stored
-// in canonical slash form, so a backslash is never valid in one, and on
-// Windows filepath.Join would treat "..\\..\\x" as an escape that Clean — on
-// Linux — sees as a single harmless filename component. Rejecting both forms
-// keeps a given tree meaning the same thing on every OS.
+// It is deliberately only that. It is not a rule about what a filename may
+// look like: anything the filesystem can hold is storable. The filesystem is
+// more permissive than this check, and it is the source of truth — systemd
+// escapes unit names with a literal backslash, so a Linux checkout of chromium
+// really does contain system-systemd\x2dcryptsetup.slice. Refusing such a name
+// here would make it unstorable on the only platform that has it, to protect a
+// platform that can never encounter it. Whether a host can *materialize* a
+// stored name is a different question, asked where the write happens by
+// hostPathError; and cross-platform intent is expressed by the entry's OS mask,
+// not by banning the name.
+//
+// path.Clean is the slash-aware counterpart to filepath.Clean, so this
+// resolves "./..", "a/../../x" and friends identically everywhere. Only a
+// leading ".." component escapes; a name like "a..b" is untouched. A backslash
+// is an ordinary byte here: path.Clean does not split on it. On Windows
+// hostPathError is what recognizes it as a separator, and refuses the escape
+// there.
 func safeRepoPath(p string) bool {
 	if p == "" || filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
 		return false
 	}
-	if strings.ContainsRune(p, '\\') {
+	// entryKey/parseKey use NUL to separate a name from its OS mask, so a name
+	// holding one would silently address a different entry. No filesystem
+	// produces such a name; only a hand-written tree can.
+	if strings.IndexByte(p, 0) >= 0 {
 		return false
 	}
-	if len(p) >= 2 && p[1] == ':' { // Windows drive-relative, e.g. "C:foo"
-		return false
-	}
-	// path.Clean is the slash-aware counterpart to filepath.Clean, so this
-	// resolves "./..", "a/../../x" and friends identically everywhere. Only a
-	// leading ".." component escapes; a name like "a..b" is untouched.
 	clean := path.Clean(p)
 	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
 }
@@ -125,6 +133,14 @@ func (r *Repository) writeWorkTreeFile(rel string, data []byte, mode uint32) (st
 	if !safeRepoPath(rel) {
 		return "", fmt.Errorf("%w: %s", errOutsideWorkTree, rel)
 	}
+	// safeRepoPath only asked whether the name may be joined onto the root. This
+	// asks whether this host can actually create it — a Linux filename holding a
+	// backslash is storable, but on Windows that byte is a separator. The two
+	// answers are kept apart so a caller can skip the second kind and still fail
+	// hard on the first.
+	if err := hostPathError(rel, hostGOOS()); err != nil {
+		return "", err
+	}
 	if err := checkParentsNotSymlinks(r.Path, rel); err != nil {
 		return "", err
 	}
@@ -157,6 +173,9 @@ func (r *Repository) makeWorkTreeDir(rel string) (string, error) {
 	if !safeRepoPath(rel) {
 		return "", fmt.Errorf("%w: %s", errOutsideWorkTree, rel)
 	}
+	if err := hostPathError(rel, hostGOOS()); err != nil {
+		return "", err
+	}
 	if err := checkParentsNotSymlinks(r.Path, rel); err != nil {
 		return "", err
 	}
@@ -173,6 +192,9 @@ func (r *Repository) makeWorkTreeDir(rel string) (string, error) {
 func (r *Repository) removeWorkTreeFile(rel string) error {
 	if !safeRepoPath(rel) {
 		return fmt.Errorf("%w: %s", errOutsideWorkTree, rel)
+	}
+	if err := hostPathError(rel, hostGOOS()); err != nil {
+		return err
 	}
 	if err := checkParentsNotSymlinks(r.Path, rel); err != nil {
 		return err

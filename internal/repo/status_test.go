@@ -1070,14 +1070,15 @@ func TestStatusRefusesUnreadableHEADSide(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A tree no consumer can read back: the name is a legal Linux filename but
-	// not one a tree entry can carry.
+	// A tree no consumer can read back: the name escapes the repository root.
+	// (A backslash name used to serve here, but that is a legal Linux filename
+	// and a tree may now carry one.)
 	blob, err := r.StoreObject(core.ObjectBlob, []byte("unit"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	treeContent, err := core.SerializeJSON(&Tree{Entries: []TreeEntry{
-		{Name: `sys/system-systemd\x2dcryptsetup.slice`, Hash: blob, Size: 4, Mode: 0644},
+		{Name: "../victim.txt", Hash: blob, Size: 4, Mode: 0644},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -1102,7 +1103,7 @@ func TestStatusRefusesUnreadableHEADSide(t *testing.T) {
 	if err == nil {
 		t.Fatal("status reported a result it could not have computed")
 	}
-	if !strings.Contains(err.Error(), "x2dcryptsetup.slice") {
+	if !strings.Contains(err.Error(), "victim.txt") {
 		t.Errorf("the error does not name the entry that caused it: %v", err)
 	}
 }

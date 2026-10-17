@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -187,18 +188,22 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	trackedDirs := make(map[string]bool)
 	allEntries := make(map[string]IndexEntry)
 	for key, entry := range idx.Entries {
-		path, _ := parseKey(key)
+		name, _ := parseKey(key)
 		if include == nil && exclude == nil {
 			if osMatch(entry.OSS, currentOS()) {
-				tracked[path] = true
-				allEntries[path] = entry
+				tracked[name] = true
+				allEntries[name] = entry
 			}
 		} else if MatchOSExpr(entry.OSS, include, exclude) {
-			tracked[path] = true
-			allEntries[path] = entry
+			tracked[name] = true
+			allEntries[name] = entry
 		}
-		for dir := filepath.Dir(path); dir != "."; dir = filepath.Dir(dir) {
-			trackedDirs[filepath.ToSlash(dir)] = true
+		// path.Dir, not filepath.Dir: a stored name is always slash-separated,
+		// and a backslash in one is an ordinary character. filepath.Dir would
+		// split on it on Windows, inventing parent directories that do not
+		// exist in the name.
+		for dir := path.Dir(name); dir != "."; dir = path.Dir(dir) {
+			trackedDirs[dir] = true
 		}
 	}
 

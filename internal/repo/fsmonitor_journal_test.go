@@ -214,7 +214,11 @@ func TestJournalWithoutReady(t *testing.T) {
 // ---- change path validation ----
 
 func TestValidChangePath(t *testing.T) {
-	valid := []string{"a.txt", "src/main.go", "a/b/c/d.txt", "a..b", ".qinignore", "src/.qin/x"}
+	valid := []string{
+		"a.txt", "src/main.go", "a/b/c/d.txt", "a..b", ".qinignore", "src/.qin/x",
+		`a\b`,   // a legal Linux filename; the journal records real paths
+		"C:foo", // likewise — drive-relative only under Windows' syntax
+	}
 	invalid := []string{
 		"",                 // empty
 		"/etc/passwd",      // absolute
@@ -222,8 +226,6 @@ func TestValidChangePath(t *testing.T) {
 		"a/../../outside",  // escapes after cleaning
 		"..",               // the parent itself
 		".",                // not a file
-		"a\\b",             // backslash: never canonical
-		"C:foo",            // Windows drive-relative
 		"a\x00b",           // NUL would break the composite index key
 		".qin",             // the monitor's own state
 		".qin/fsmonitor/x", // ...and its contents

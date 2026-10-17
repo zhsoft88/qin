@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/zhsoft88/qin/internal/core"
 )
@@ -54,6 +56,10 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 
 	newIndex := &Index{Entries: make(map[string]IndexEntry, len(tree.Entries))}
 	cOS := currentOS()
+	// Entries this host cannot create on disk. They still go into the index, and
+	// the restore completes; the caller is told afterwards rather than the whole
+	// operation being abandoned or the loss going unreported.
+	var skipped []string
 
 	// Group tree entries by name for OS-aware filtering
 	type namedEntry struct {
@@ -87,15 +93,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 		}
 		if winner == nil {
 			// No matching OS variant — still add to index, skip working tree
-			for _, e := range group.entries {
-				key := entryKey(name, e.OSS)
-				newIndex.Entries[key] = IndexEntry{
-					Hash: e.Hash,
-					Size: e.Size,
-					Mode: e.Mode,
-					OSS:  e.OSS,
-				}
-			}
+			addTreeVariants(newIndex, name, group.entries)
 			continue
 		}
 
@@ -104,15 +102,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 			if _, err := r.makeWorkTreeDir(name); err != nil {
 				return fmt.Errorf("create submodule dir %s: %w", name, err)
 			}
-			for _, e := range group.entries {
-				key := entryKey(name, e.OSS)
-				newIndex.Entries[key] = IndexEntry{
-					Hash: e.Hash,
-					Size: e.Size,
-					Mode: e.Mode,
-					OSS:  e.OSS,
-				}
-			}
+			addTreeVariants(newIndex, name, group.entries)
 			continue
 		}
 
@@ -161,8 +151,13 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 				// working tree silently half-restored.
 				return fmt.Errorf("restore %s: %w", name, err)
 			}
-			// Otherwise the entry cannot be written on this platform; skip it,
-			// matching the previous behaviour.
+			// Otherwise the entry cannot be created on this platform. Skip the
+			// working tree but keep it in the index, so the next commit does
+			// not quietly drop what this host could not check out. Collect it:
+			// a checkout that leaves files behind and exits 0 is the same shape
+			// as a push that moves nothing and reports success.
+			addTreeVariants(newIndex, name, group.entries)
+			skipped = append(skipped, name)
 			continue
 		}
 
@@ -205,7 +200,38 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 		return fmt.Errorf("save index: %w", err)
 	}
 
+	if len(skipped) > 0 {
+		sort.Strings(skipped)
+		return fmt.Errorf("%d path(s) cannot be created on %s: %s",
+			len(skipped), hostGOOS(), summarizePaths(skipped))
+	}
 	return nil
+}
+
+// addTreeVariants records every OS variant of a tree entry in the index without
+// touching the working tree. Used for entries this host does not restore — an
+// OS variant that does not match, a submodule, or a name this platform cannot
+// create. Leaving them out of the index would let the next commit build a tree
+// that no longer mentions them.
+func addTreeVariants(idx *Index, name string, entries []TreeEntry) {
+	for _, e := range entries {
+		idx.Entries[entryKey(name, e.OSS)] = IndexEntry{
+			Hash: e.Hash,
+			Size: e.Size,
+			Mode: e.Mode,
+			OSS:  e.OSS,
+		}
+	}
+}
+
+// summarizePaths lists names for an error message without letting a tree with
+// thousands of unrepresentable entries produce one unreadable line.
+func summarizePaths(names []string) string {
+	const max = 10
+	if len(names) <= max {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s, ... and %d more", strings.Join(names[:max], ", "), len(names)-max)
 }
 
 // ListBranches returns all branch names and marks the current one.
