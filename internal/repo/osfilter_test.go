@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/zhsoft88/qin/internal/core"
 )
 
 func TestEntryKeyAndParse(t *testing.T) {
@@ -468,7 +470,10 @@ func TestAddFileWithOS(t *testing.T) {
 	}
 }
 
-func TestAddDefaultAndOSSamePath(t *testing.T) {
+// TestAddOSVariantDropsDefault pins the exclusivity rule: a default variant
+// means "every OS", so tagging a path for one OS must remove it — otherwise
+// the path still materializes on exactly the platforms the tag excludes.
+func TestAddOSVariantDropsDefault(t *testing.T) {
 	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
 		t.Fatal(err)
@@ -492,16 +497,50 @@ func TestAddDefaultAndOSSamePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify both coexist
+	// The linux tag displaces the default, so the path is invisible to every
+	// other platform rather than merely shadowed on linux.
 	idx, err := r.LoadIndex()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := idx.Entries["config.yaml"]; !ok {
-		t.Error("expected default config.yaml in index")
+	if _, ok := idx.Entries["config.yaml"]; ok {
+		t.Error("an --os add must drop the default variant")
 	}
 	if _, ok := idx.Entries["config.yaml\x00\x04"]; !ok {
 		t.Error("expected linux config.yaml in index")
+	}
+	if _, ok := visibleEntries(idx.Entries, OSWin)["config.yaml"]; ok {
+		t.Error("linux-tagged path is still visible on windows")
+	}
+
+	// An explicit default is the one way to ask for coexistence; it is what
+	// --os-match '*' stages.
+	if err := r.AddFileOS(filepath.Join(dir, "config.yaml"), ""); err != nil {
+		t.Fatal(err)
+	}
+	idx, err = r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := idx.Entries["config.yaml"]; !ok {
+		t.Error("expected explicitly staged default config.yaml in index")
+	}
+	if _, ok := idx.Entries["config.yaml\x00\x04"]; !ok {
+		t.Error("expected linux config.yaml in index")
+	}
+
+	// A plain add follows the visible variant without disturbing the explicit
+	// default: exclusivity is a property of the tag, not of every add.
+	ioutil.WriteFile(filepath.Join(dir, "config.yaml"), []byte("newer linux config"), 0644)
+	if err := r.AddFile(filepath.Join(dir, "config.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	idx, err = r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := idx.Entries["config.yaml"]; !ok {
+		t.Error("plain add removed the explicitly staged default")
 	}
 
 	// Build tree and verify OS field preserved
@@ -563,6 +602,58 @@ func TestAddDefaultAndOSSamePath(t *testing.T) {
 	}
 }
 
+// TestPlainAddFollowsVisibleVariant pins the other half of the rule: once a
+// path carries the running host's variant, a plain add updates that variant
+// rather than creating a default beside it. The default would be shadowed here
+// (the add would look like it did nothing, status would keep saying modified)
+// and visible on every other platform.
+func TestPlainAddFollowsVisibleVariant(t *testing.T) {
+	dir, err := ioutil.TempDir("", "lo-test-os-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := currentOS()
+	if host == 0 {
+		t.Skip("unknown host OS")
+	}
+
+	path := filepath.Join(dir, "f.txt")
+	if err := ioutil.WriteFile(path, []byte("one"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFileOS(path, OSName(host)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ioutil.WriteFile(path, []byte("two"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFile(path); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := idx.Entries[entryKey("f.txt", 0)]; ok {
+		t.Error("plain add created a default beside the host's variant")
+	}
+	e, ok := idx.Entries[entryKey("f.txt", host)]
+	if !ok {
+		t.Fatal("plain add dropped the host's variant")
+	}
+	if e.ContentHash != core.HashFromBytes([]byte("two")) {
+		t.Error("plain add did not update the host's variant")
+	}
+}
+
 func TestRemoveFileWithOS(t *testing.T) {
 	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
@@ -576,8 +667,10 @@ func TestRemoveFileWithOS(t *testing.T) {
 	}
 
 	ioutil.WriteFile(filepath.Join(dir, "f.txt"), []byte("data"), 0644)
-	r.AddFile(filepath.Join(dir, "f.txt"))
+	// An --os add drops the default, so stage the pair explicitly: the linux
+	// variant first, then an explicit default (what --os-match '*' does).
 	r.AddFileOS(filepath.Join(dir, "f.txt"), "linux")
+	r.AddFileOS(filepath.Join(dir, "f.txt"), "")
 
 	// Remove only linux variant
 	if err := r.RemoveFileOS(filepath.Join(dir, "f.txt"), "linux"); err != nil {

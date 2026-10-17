@@ -269,45 +269,61 @@ func (r *Repository) SaveIndex(idx *Index) error {
 	return nil
 }
 
-// AddFile reads a file from disk, stores it as an object, and adds it to the index
-// as a default (all-OS) entry.
+// AddFile reads a file from disk, stores it as an object, and adds it to the
+// index under the variant this host currently sees: an OS-specific entry that
+// matches the host wins over the default. Writing a default beside an
+// OS-specific entry would be invisible here — the OS-specific one is what this
+// host reads — and would make the path visible on every other platform.
 func (r *Repository) AddFile(filePath string) error {
-	return r.addFileInternal(filePath, 0)
+	return r.addFileInternal(filePath, 0, true)
 }
 
 // AddFileOS reads a file from disk, stores it as an object, and adds it to the
-// index as an OS-specific entry. The os parameter must be a known OS identifier.
+// index as an OS-specific entry. The os parameter must be a known OS identifier;
+// an empty one means the default (all-OS) variant. Tagging a path for an OS
+// removes its default variant: the default would materialize the path on the
+// platforms the mask was meant to hide.
 func (r *Repository) AddFileOS(filePath, osTag string) error {
 	id := OSID(osTag)
 	if osTag != "" && id == 0 {
 		return fmt.Errorf("unknown OS: %s", osTag)
 	}
-	return r.addFileInternal(filePath, id)
+	return r.addFileInternal(filePath, id, false)
 }
 
 // AddFileOSMatch adds a file with an OS expression. The expression is resolved
 // to an OS bitmask stored in the entry's OSS field; the mask is also used as
-// the key discriminator.
+// the key discriminator. An empty expression is a plain add and follows the
+// visible variant; "*" explicitly asks for the default (all-OS) variant.
 func (r *Repository) AddFileOSMatch(filePath, expr string) error {
-	if expr == "" || expr == "*" {
-		return r.addFileInternal(filePath, 0)
+	if expr == "" {
+		return r.addFileInternal(filePath, 0, true)
+	}
+	if expr == "*" {
+		return r.addFileInternal(filePath, 0, false)
 	}
 	include, exclude, err := ParseOSExpr(expr)
 	if err != nil {
 		return fmt.Errorf("invalid OS expression: %w", err)
 	}
-	return r.addFileInternal(filePath, MaskFromOSExpr(include, exclude))
+	return r.addFileInternal(filePath, MaskFromOSExpr(include, exclude), false)
 }
 
 // addFileInternal is the shared implementation for AddFile, AddFileOS, and AddFileOSMatch.
 // It loads the index, processes one file, and saves — use AddFiles/AddFilesOSMatch
-// for batch operations that avoid per-file index save.
-func (r *Repository) addFileInternal(filePath string, oss uint8) error {
+// for batch operations that avoid per-file index save. auto selects the variant
+// this host sees instead of the mask the caller named.
+func (r *Repository) addFileInternal(filePath string, oss uint8, auto bool) error {
 	idx, err := r.LoadIndex()
 	if err != nil {
 		return err
 	}
-	changed, err := r.AddFileToIndex(filePath, oss, idx)
+	var changed bool
+	if auto {
+		changed, err = r.AddFileToIndexVisible(filePath, idx)
+	} else {
+		changed, err = r.AddFileToIndex(filePath, oss, idx)
+	}
 	if err != nil {
 		return err
 	}
@@ -323,6 +339,64 @@ func (r *Repository) addFileInternal(filePath string, oss uint8) error {
 // with the same object hash and mode is left untouched (git-style skip).
 // Does NOT save the index — caller must call SaveIndex.
 func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (bool, error) {
+	return r.addFileToIndex(filePath, oss, false, idx)
+}
+
+// AddFileToIndexVisible is the plain-add form of AddFileToIndex: the file is
+// staged under the variant this host sees rather than under a caller-supplied
+// mask. See AddFile for why that is the right default.
+func (r *Repository) AddFileToIndexVisible(filePath string, idx *Index) (bool, error) {
+	return r.addFileToIndex(filePath, 0, true, idx)
+}
+
+// VisibleOSMask reports the mask a plain add of name would write, given idx.
+// It is the display half of AddFileToIndexVisible.
+func VisibleOSMask(idx *Index, name string) uint8 {
+	return visibleMask(idx, name)
+}
+
+// visibleMask returns the mask this host currently sees for name: the
+// OS-specific variant that matches it, or 0 when only a default (or no entry
+// at all) exists. An exact match for this OS wins so the choice is
+// deterministic when a path carries several masks.
+func visibleMask(idx *Index, name string) uint8 {
+	cOS := currentOS()
+	if cOS == 0 {
+		return 0
+	}
+	if _, ok := idx.Entries[entryKey(name, cOS)]; ok {
+		return cOS
+	}
+	for mask := uint8(1); mask <= 7; mask++ {
+		if mask == cOS || !osMatch(mask, cOS) {
+			continue
+		}
+		if _, ok := idx.Entries[entryKey(name, mask)]; ok {
+			return mask
+		}
+	}
+	return 0
+}
+
+// dropDefaultVariant removes the default entry for name when an OS-specific
+// variant is being written. Mask 0 means "every OS", so leaving it behind
+// would materialize the path on exactly the platforms the mask excludes — the
+// Windows checkout of a linux-tagged path, which is the whole reason the mask
+// exists. An explicit default can still be staged with --os-match '*'.
+// Returns whether the index changed.
+func dropDefaultVariant(idx *Index, name string, oss uint8) bool {
+	if oss == 0 {
+		return false
+	}
+	key := entryKey(name, 0)
+	if _, ok := idx.Entries[key]; !ok {
+		return false
+	}
+	delete(idx.Entries, key)
+	return true
+}
+
+func (r *Repository) addFileToIndex(filePath string, oss uint8, auto bool, idx *Index) (bool, error) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return false, fmt.Errorf("resolve path: %w", err)
@@ -338,6 +412,15 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 
 	relFormatted := filepath.ToSlash(relPath)
 
+	// A plain add follows what this host already sees for the path. It must not
+	// introduce a default beside an OS-specific variant: this host reads the
+	// variant, so the default would be shadowed and the add would look like it
+	// did nothing; every other platform would then see a path the mask was
+	// meant to hide.
+	if auto {
+		oss = visibleMask(idx, relFormatted)
+	}
+
 	// The walk skips .qin before it descends, so this is the rule's backstop
 	// rather than its usual site: it is what makes the invariant hold for every
 	// caller, not just the two that happen to walk a directory.
@@ -345,11 +428,10 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 		return false, fmt.Errorf("path inside %s cannot be tracked", QinDir)
 	}
 
-	// The ignore rules are consulted first, and that order is the point: a path
-	// that is not being added has no name for the tree rule to judge. It is what
-	// makes .qinignore the remedy for a file whose name a tree can never carry —
-	// the file is on disk, the walk will keep reaching it, and ignoring it is the
-	// only way to say "not this one" without deleting it.
+	// The ignore rules are consulted first. Their original reason — standing in
+	// for a name rule that refused more than escaping — is gone, but the order
+	// is still right: an ignored path should not be considered at all, so
+	// `qin add .` must not fail over a file the user has put out of scope.
 	ignorer, err := r.LoadIgnoreMatcher()
 	if err != nil {
 		return false, err
@@ -358,17 +440,9 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 		return false, ErrIgnored
 	}
 
-	// The name must satisfy the same rule LoadTree validates entries with, and
-	// it has to be checked here because the filesystem is more permissive than
-	// a tree: a name holding a backslash is an ordinary Linux filename — systemd
-	// escapes unit names that way, so chromium's sysroot really contains
-	// system-systemd\x2dcryptsetup.slice — but it cannot be a tree entry.
-	//
-	// Letting one in does not fail at add time, which is the whole problem. It
-	// makes the commit containing it permanently unreadable: LoadTree rejects
-	// the *whole* tree over one bad name, so status stops comparing against
-	// HEAD, and push skips the tree and reports success. Refusing the file here
-	// is the only point at which the user can still be told which one it is.
+	// The name must be safe to join onto the working tree root; LoadTree applies
+	// the same rule to the names it reads back. Anything the filesystem can hold
+	// is storable, so this refuses only escapes, not unusual filenames.
 	if !safeRepoPath(relFormatted) {
 		return false, fmt.Errorf("cannot store %q: not a valid tree entry name", relFormatted)
 	}
@@ -387,8 +461,12 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 			return false, fmt.Errorf("cannot add non-empty directory: %s", filePath)
 		}
 		key := entryKey(relFormatted, oss)
+		// Only an explicit --os tag is exclusive. A plain add follows the
+		// variant this host reads and leaves an explicitly staged default
+		// (--os-match '*') alone.
+		dropped := !auto && dropDefaultVariant(idx, relFormatted, oss)
 		if e, ok := idx.Entries[key]; ok && e.Mode == DirMode {
-			return false, nil // unchanged — already in the index
+			return dropped, nil // entry unchanged; dropping the default still counts
 		}
 		idx.Entries[key] = IndexEntry{
 			Mode:  DirMode,
@@ -432,8 +510,11 @@ func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (boo
 	mode := uint32(fi.Mode())
 
 	key := entryKey(filepath.ToSlash(relPath), oss)
+	// As in the directory branch: exclusivity belongs to the explicit tag, not
+	// to a plain add following the visible variant.
+	dropped := !auto && dropDefaultVariant(idx, relFormatted, oss)
 	if e, ok := idx.Entries[key]; ok && e.Hash == h && e.Mode == mode {
-		return false, nil // unchanged — already in the index
+		return dropped, nil // entry unchanged; dropping the default still counts
 	}
 	idx.Entries[key] = IndexEntry{
 		Hash:        h,
@@ -465,8 +546,11 @@ func (r *Repository) AddFiles(files []string) error {
 	return r.AddFilesOSMatch(files, "")
 }
 
-// AddFilesOSMatch adds multiple files with an OS expression in a batch.
+// AddFilesOSMatch adds multiple files with an OS expression in a batch. As with
+// AddFileOSMatch, an empty expression is a plain add and "*" asks for the
+// default (all-OS) variant.
 func (r *Repository) AddFilesOSMatch(files []string, expr string) error {
+	visible := expr == ""
 	var mask uint8
 	if expr != "" && expr != "*" {
 		include, exclude, err := ParseOSExpr(expr)
@@ -483,7 +567,12 @@ func (r *Repository) AddFilesOSMatch(files []string, expr string) error {
 
 	changedAny := false
 	for _, f := range files {
-		changed, err := r.AddFileToIndex(f, mask, idx)
+		var changed bool
+		if visible {
+			changed, err = r.AddFileToIndexVisible(f, idx)
+		} else {
+			changed, err = r.AddFileToIndex(f, mask, idx)
+		}
 		if err != nil {
 			return fmt.Errorf("add %s: %w", f, err)
 		}

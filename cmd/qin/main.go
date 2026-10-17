@@ -291,7 +291,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		if pathExcluded(r, path, excludes) {
 			return nil
 		}
-		changed, err := r.AddFileToIndex(path, 0, idx)
+		changed, err := r.AddFileToIndexVisible(path, idx)
 		if err != nil {
 			return err
 		}
@@ -300,6 +300,9 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		}
 		(*added)++
 		display := relPath(r, path)
+		// The plain walk follows the variant this host already sees, so the
+		// decoration has to show that mask rather than a hardcoded default.
+		addSuf := " [" + repo.OSNameOrStar(repo.VisibleOSMask(idx, display)) + "]   "
 		cd := 1
 		for n := *added; n >= 10; n /= 10 {
 			cd++
@@ -309,7 +312,6 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			w = 80
 		}
 		const addPre = "\r["
-		const addSuf = " [*]   "
 		overhead := len(addPre) + len("] ") + len(addSuf)
 		max := w - 2 - overhead - cd
 
@@ -338,7 +340,7 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 		return err
 	}
 	if len(entries) == 0 {
-		changed, err := r.AddFileToIndex(path, 0, idx)
+		changed, err := r.AddFileToIndexVisible(path, idx)
 		if err != nil {
 			return err
 		}
@@ -346,7 +348,9 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			return nil // already in the index with the same content
 		}
 		(*added)++
-		display := relPath(r, path) + "/"
+		rel := relPath(r, path)
+		display := rel + "/"
+		dSuf := " [" + repo.OSNameOrStar(repo.VisibleOSMask(idx, rel)) + "]   "
 		cd := 1
 		for n := *added; n >= 10; n /= 10 {
 			cd++
@@ -356,7 +360,6 @@ func addFileOrDir(r *repo.Repository, path string, excludes []string, added *int
 			w = 80
 		}
 		const dPre = "\r["
-		const dSuf = " [*]   "
 		overhead := len(dPre) + len("] ") + len(dSuf)
 		max := w - 2 - overhead - cd
 

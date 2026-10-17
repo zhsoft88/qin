@@ -8,6 +8,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/zhsoft88/qin/internal/core"
 	"github.com/zhsoft88/qin/internal/repo"
 )
 
@@ -110,6 +111,19 @@ func entryAt(t *testing.T, idx *repo.Index, path string) repo.IndexEntry {
 	}
 	t.Fatalf("%s is not in the index; indexed: %v", path, indexedPaths(idx))
 	return repo.IndexEntry{}
+}
+
+// masksAt lists the OS masks stored for path, sorted. A path with both a
+// default and an OS variant has two entries under different keys.
+func masksAt(idx *repo.Index, path string) []uint8 {
+	var out []uint8
+	for key := range idx.Entries {
+		if p, m := repo.ParseKey(key); p == path {
+			out = append(out, m)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // assertSymlinkEntry checks that an entry stores the link itself: a symlink
@@ -329,5 +343,58 @@ func TestAddSkipsIgnoredName(t *testing.T) {
 	}
 	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{".qinignore", "ok.slice"}) {
 		t.Fatalf("indexed = %v, want [.qinignore ok.slice]", got)
+	}
+}
+
+// TestAddOSExprDropsDefaultVariant is the rule that makes an --os directory
+// actually OS-only: a default entry means "every OS", so staging the same path
+// for one OS must remove it. Otherwise a linux-only tree still materializes on
+// Windows, which is exactly the .cipd clone failure.
+func TestAddOSExprDropsDefaultVariant(t *testing.T) {
+	r, dir := newAddRepo(t)
+	host := repo.CurrentOSID()
+	if host == 0 {
+		t.Skip("unknown host OS")
+	}
+
+	writeAt(t, dir, "pkg/thing.txt", "payload")
+	idx := indexAfterAdd(t, r, "pkg")
+	if got := masksAt(idx, "pkg/thing.txt"); !reflect.DeepEqual(got, []uint8{0}) {
+		t.Fatalf("plain add masks = %v, want the default", got)
+	}
+	if err := r.SaveIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+
+	idx = indexAfterAddOSExpr(t, r, "pkg")
+	if got := masksAt(idx, "pkg/thing.txt"); !reflect.DeepEqual(got, []uint8{host}) {
+		t.Fatalf("--os add masks = %v, want only the host's %d", got, host)
+	}
+}
+
+// TestPlainAddKeepsOSVariant is the other half: after a path is tagged, a plain
+// add updates the variant this host sees. Writing a default instead would be
+// shadowed here (the add would look like a no-op) and visible elsewhere.
+func TestPlainAddKeepsOSVariant(t *testing.T) {
+	r, dir := newAddRepo(t)
+	host := repo.CurrentOSID()
+	if host == 0 {
+		t.Skip("unknown host OS")
+	}
+
+	writeAt(t, dir, "pkg/thing.txt", "one")
+	idx := indexAfterAddOSExpr(t, r, "pkg")
+	if err := r.SaveIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+
+	writeAt(t, dir, "pkg/thing.txt", "two")
+	idx = indexAfterAdd(t, r, "pkg")
+	if got := masksAt(idx, "pkg/thing.txt"); !reflect.DeepEqual(got, []uint8{host}) {
+		t.Fatalf("plain add masks = %v, want only the host's %d", got, host)
+	}
+	e := entryAt(t, idx, "pkg/thing.txt")
+	if e.ContentHash != core.HashFromBytes([]byte("two")) {
+		t.Error("plain add did not update the visible variant")
 	}
 }
