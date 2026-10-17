@@ -85,7 +85,7 @@ type fsmonitorChanges struct {
 
 // fsmonitorDir is the monitor's state directory.
 func (r *Repository) fsmonitorDir() string {
-	return filepath.Join(r.LoDir(), fsmonitorDirName)
+	return filepath.Join(r.QinDir(), fsmonitorDirName)
 }
 
 // fsmonitorPath is the cursor sidecar.

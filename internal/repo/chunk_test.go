@@ -11,7 +11,7 @@ import (
 )
 
 func TestStoreAndLoadChunkedFile(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestStoreAndLoadChunkedFile(t *testing.T) {
 
 func TestStoreChunkedSmallFile(t *testing.T) {
 	// Files smaller than min chunk should create a single chunk
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestStoreChunkedSmallFile(t *testing.T) {
 }
 
 func TestAddFileAutoChunksLarge(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestAddFileAutoChunksLarge(t *testing.T) {
 }
 
 func TestAddFileSmallSkipsChunking(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestAddFileSmallSkipsChunking(t *testing.T) {
 }
 
 func TestChunkedFileRoundTripWithModification(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

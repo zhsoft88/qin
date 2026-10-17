@@ -8,15 +8,15 @@ import (
 	"path/filepath"
 )
 
-const loModulesFile = ".lomodules"
+const qinModulesFile = ".qinmodules"
 
 // SubmoduleDef describes a single submodule: the remote URL it points to.
 type SubmoduleDef struct {
 	URL string `json:"url"`
 }
 
-// LoModules is the parsed content of .lomodules.
-type LoModules struct {
+// QinModules is the parsed content of .qinmodules.
+type QinModules struct {
 	Submodules map[string]SubmoduleDef `json:"submodules"`
 }
 
@@ -38,21 +38,21 @@ func IsDirMode(mode uint32) bool {
 	return mode == DirMode
 }
 
-// LoadLoModules reads .lomodules from disk. Returns an empty mapping
+// LoadQinModules reads .qinmodules from disk. Returns an empty mapping
 // if the file doesn't exist.
-func LoadLoModules(r *Repository) (*LoModules, error) {
-	path := filepath.Join(r.Path, loModulesFile)
+func LoadQinModules(r *Repository) (*QinModules, error) {
+	path := filepath.Join(r.Path, qinModulesFile)
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &LoModules{Submodules: make(map[string]SubmoduleDef)}, nil
+			return &QinModules{Submodules: make(map[string]SubmoduleDef)}, nil
 		}
-		return nil, fmt.Errorf("read %s: %w", loModulesFile, err)
+		return nil, fmt.Errorf("read %s: %w", qinModulesFile, err)
 	}
 
-	var mods LoModules
+	var mods QinModules
 	if err := json.Unmarshal(data, &mods); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", loModulesFile, err)
+		return nil, fmt.Errorf("parse %s: %w", qinModulesFile, err)
 	}
 	if mods.Submodules == nil {
 		mods.Submodules = make(map[string]SubmoduleDef)
@@ -60,24 +60,24 @@ func LoadLoModules(r *Repository) (*LoModules, error) {
 	return &mods, nil
 }
 
-// SaveLoModules writes .lomodules to disk.
-func SaveLoModules(r *Repository, mods *LoModules) error {
+// SaveQinModules writes .qinmodules to disk.
+func SaveQinModules(r *Repository, mods *QinModules) error {
 	data, err := json.MarshalIndent(mods, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal %s: %w", loModulesFile, err)
+		return fmt.Errorf("marshal %s: %w", qinModulesFile, err)
 	}
-	if err := ioutil.WriteFile(filepath.Join(r.Path, loModulesFile), data, 0644); err != nil {
-		return fmt.Errorf("write %s: %w", loModulesFile, err)
+	if err := ioutil.WriteFile(filepath.Join(r.Path, qinModulesFile), data, 0644); err != nil {
+		return fmt.Errorf("write %s: %w", qinModulesFile, err)
 	}
 	return nil
 }
 
 // AddSubmodule clones a submodule repo at the given path, records its URL
-// in .lomodules, and stages both the .lomodules file and the
+// in .qinmodules, and stages both the .qinmodules file and the
 // submodule entry in the index.
 func AddSubmodule(r *Repository, url, path string) error {
 	// The path is untrusted on the clone --recursive and `submodule update
-	// --init` routes, where it is a key read from .lomodules — a tracked file
+	// --init` routes, where it is a key read from .qinmodules — a tracked file
 	// delivered by the clone. Joined unchecked, "../.." would clone
 	// attacker-chosen content to an arbitrary location outside the working
 	// tree, with no prompt. git likewise refuses submodule paths outside it.
@@ -102,18 +102,18 @@ func AddSubmodule(r *Repository, url, path string) error {
 		return fmt.Errorf("submodule has no commits")
 	}
 
-	// Update .lomodules
-	mods, err := LoadLoModules(r)
+	// Update .qinmodules
+	mods, err := LoadQinModules(r)
 	if err != nil {
 		return err
 	}
 	mods.Submodules[rel] = SubmoduleDef{URL: url}
-	if err := SaveLoModules(r, mods); err != nil {
+	if err := SaveQinModules(r, mods); err != nil {
 		return err
 	}
 
-	// Stage .lomodules
-	modulesPath := filepath.Join(r.Path, loModulesFile)
+	// Stage .qinmodules
+	modulesPath := filepath.Join(r.Path, qinModulesFile)
 	if err := r.AddFile(modulesPath); err != nil {
 		return err
 	}

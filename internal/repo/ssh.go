@@ -66,7 +66,7 @@ func sshStdin(host, cmd string, stdinData []byte) error {
 // ---- SSH remote operations ----
 
 func sshReadRef(host, repoPath, ref string) (string, error) {
-	cmd := fmt.Sprintf("cat %s", filepath.Join(repoPath, LoDir, ref))
+	cmd := fmt.Sprintf("cat %s", filepath.Join(repoPath, QinDir, ref))
 	out, err := sshRun(host, cmd)
 	if err != nil {
 		return "", fmt.Errorf("read ref %s: %w", ref, err)
@@ -92,7 +92,7 @@ func sshRefKey(qinDir, path string) string {
 }
 
 func sshListRefs(host, repoPath string) (map[string]string, error) {
-	qinDir := filepath.Join(repoPath, LoDir)
+	qinDir := filepath.Join(repoPath, QinDir)
 	refsDir := filepath.Join(qinDir, "refs")
 	cmd := fmt.Sprintf("find %s -type f", refsDir)
 	out, err := sshRun(host, cmd)
@@ -139,7 +139,7 @@ func bareFromConfigJSON(data []byte) bool {
 // refs cannot tell us. The cat is plumbing; the decision is in
 // bareFromConfigJSON.
 func sshReadBare(host, repoPath string) bool {
-	out, err := sshRun(host, fmt.Sprintf("cat %s", filepath.Join(repoPath, LoDir, "config")))
+	out, err := sshRun(host, fmt.Sprintf("cat %s", filepath.Join(repoPath, QinDir, "config")))
 	if err != nil {
 		return false
 	}
@@ -155,7 +155,7 @@ func sshHasObject(host, repoPath string, hash core.Hash) bool {
 // rObjPath builds the XX/YYYYYY path for a hash, relative to the objects dir.
 func rObjPath(repoPath string, hash core.Hash) string {
 	s := hash.String()
-	return filepath.Join(repoPath, LoDir, "objects", s[:2], s[2:])
+	return filepath.Join(repoPath, QinDir, "objects", s[:2], s[2:])
 }
 
 func sshReadObject(host, repoPath string, hash core.Hash) ([]byte, error) {
@@ -170,7 +170,7 @@ func sshWriteObject(host, repoPath string, hash core.Hash, data []byte) error {
 }
 
 func sshWriteRef(host, repoPath, ref, hash string) error {
-	refPath := filepath.Join(repoPath, LoDir, ref)
+	refPath := filepath.Join(repoPath, QinDir, ref)
 	cmd := fmt.Sprintf("mkdir -p %s && cat > %s", filepath.Dir(refPath), refPath)
 	return sshStdin(host, cmd, []byte(hash+"\n"))
 }

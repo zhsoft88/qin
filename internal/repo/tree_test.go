@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildTreeFromIndex(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestBuildTreeFromIndex(t *testing.T) {
 }
 
 func TestWriteAndLoadTree(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestWriteAndLoadTree(t *testing.T) {
 }
 
 func TestBuildTreeEmptyIndex(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestBuildTreeEmptyIndex(t *testing.T) {
 }
 
 func TestWriteCommit(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestWriteCommit(t *testing.T) {
 }
 
 func TestWriteMultipleCommits(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestWriteMultipleCommits(t *testing.T) {
 }
 
 func TestWriteCommitNothingStaged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestHostileTreeCannotEscapeRepo(t *testing.T) {
 	} {
 		name := name
 		t.Run(name, func(t *testing.T) {
-			base, err := ioutil.TempDir("", "lo-test-*")
+			base, err := ioutil.TempDir("", "qin-test-*")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -334,7 +334,7 @@ func TestHostileTreeCannotEscapeRepo(t *testing.T) {
 // the check at write time — where the existing working tree is visible — can
 // see that "link" is a symlink pointing elsewhere.
 func TestTreePathThroughSymlinkedParentCannotEscapeRepo(t *testing.T) {
-	base, err := ioutil.TempDir("", "lo-test-*")
+	base, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +391,7 @@ func TestTreePathThroughSymlinkedParentCannotEscapeRepo(t *testing.T) {
 // the symlink entry cannot be written and is skipped. Both outcomes are
 // acceptable; what must never happen is the write landing outside the repo.
 func TestSymlinkAndPathThroughItCannotEscapeRepo(t *testing.T) {
-	base, err := ioutil.TempDir("", "lo-test-*")
+	base, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +491,7 @@ func hostileCommit(t *testing.T, r *Repository, entries []hostileEntry) {
 // The entry's name is an ordinary one-component path, so nothing about it
 // looks hostile — the escape depends entirely on what is already on disk.
 func TestTreeEntryReplacingSymlinkCannotEscapeRepo(t *testing.T) {
-	base, err := ioutil.TempDir("", "lo-test-*")
+	base, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +548,7 @@ func TestTreeEntryReplacingSymlinkCannotEscapeRepo(t *testing.T) {
 // escaped unit names loads intact. The name has to survive byte-for-byte —
 // every platform that can create it must be able to get it back exactly.
 func TestLoadTreeAcceptsBackslashName(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

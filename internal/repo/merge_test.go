@@ -16,7 +16,7 @@ import (
 // unknown, and that is what makes pushing over someone else's commits fail
 // without asking the target anything.
 func TestIsAncestor(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestIsAncestor(t *testing.T) {
 }
 
 func TestFindMergeBaseLinear(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestFindMergeBaseLinear(t *testing.T) {
 }
 
 func TestFindMergeBaseBranch(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestFindMergeBaseBranch(t *testing.T) {
 }
 
 func TestFastForwardMerge(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestFastForwardMerge(t *testing.T) {
 }
 
 func TestAlreadyUpToDate(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestAlreadyUpToDate(t *testing.T) {
 }
 
 func TestMergeNonExistentBranch(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestMergeNonExistentBranch(t *testing.T) {
 }
 
 func TestThreeWayMergeNoConflict(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestThreeWayMergeNoConflict(t *testing.T) {
 }
 
 func TestThreeWayMergeConflict(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestThreeWayMergeConflict(t *testing.T) {
 }
 
 func TestMergeSameFileUnchanged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +457,7 @@ func TestMergeSameFileUnchanged(t *testing.T) {
 }
 
 func TestMergeNoCommits(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

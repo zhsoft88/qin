@@ -16,7 +16,7 @@ func writeIgnore(t *testing.T, dir, content string) {
 }
 
 func TestIgnoreMatcherBasic(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestIgnoreMatcherBasic(t *testing.T) {
 }
 
 func TestIgnoreMatcherNoFile(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestIgnoreMatcherNoFile(t *testing.T) {
 }
 
 func TestIgnoreMatcherCommentsAndBlanks(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestIgnoreMatcherCommentsAndBlanks(t *testing.T) {
 }
 
 func TestIgnoreStatusFiltering(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestGlobMatch(t *testing.T) {
 }
 
 func TestIgnoreNegation(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

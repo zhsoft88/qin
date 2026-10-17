@@ -54,7 +54,7 @@ func noBackend(t *testing.T) {
 // enabled, returning the repository and its directory.
 func newMonitorRepo(t *testing.T) (*Repository, string) {
 	t.Helper()
-	dir, err := ioutil.TempDir("", "lo-test-mon-*")
+	dir, err := ioutil.TempDir("", "qin-test-mon-*")
 	if err != nil {
 		t.Fatal(err)
 	}

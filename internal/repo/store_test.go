@@ -10,7 +10,7 @@ import (
 )
 
 func TestStoreRoundTrip(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestStoreRoundTrip(t *testing.T) {
 }
 
 func TestStoreLoadNonExistent(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestStoreLoadNonExistent(t *testing.T) {
 }
 
 func TestStoreAllObjectTypes(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

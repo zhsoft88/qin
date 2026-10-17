@@ -428,7 +428,7 @@ func TestOSMatch(t *testing.T) {
 // ---- Integration tests ----
 
 func TestAddFileWithOS(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-os-*")
+	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestAddFileWithOS(t *testing.T) {
 }
 
 func TestAddDefaultAndOSSamePath(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-os-*")
+	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func TestAddDefaultAndOSSamePath(t *testing.T) {
 }
 
 func TestRemoveFileWithOS(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-os-*")
+	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +602,7 @@ func TestRemoveFileWithOS(t *testing.T) {
 }
 
 func TestStatusVisibleOnly(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-os-*")
+	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,13 +645,13 @@ func TestStatusVisibleOnly(t *testing.T) {
 }
 
 func TestLazyCloneWithOS(t *testing.T) {
-	sourceDir, err := ioutil.TempDir("", "lo-source-*")
+	sourceDir, err := ioutil.TempDir("", "qin-source-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(sourceDir)
 
-	cloneDir, err := ioutil.TempDir("", "lo-clone-*")
+	cloneDir, err := ioutil.TempDir("", "qin-clone-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +723,7 @@ func TestLazyCloneWithOS(t *testing.T) {
 }
 
 func TestShowOS(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-os-*")
+	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -764,7 +764,7 @@ func TestShowOS(t *testing.T) {
 }
 
 func TestAddFileOSMatch(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-osmatch-*")
+	dir, err := ioutil.TempDir("", "qin-test-osmatch-*")
 	if err != nil {
 		t.Fatal(err)
 	}

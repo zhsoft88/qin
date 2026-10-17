@@ -102,7 +102,7 @@ func newFailingWatcher() *failingWatcher {
 // feature off.
 func daemonRepo(t *testing.T) (*Repository, string) {
 	t.Helper()
-	dir, err := ioutil.TempDir("", "lo-test-daemon-*")
+	dir, err := ioutil.TempDir("", "qin-test-daemon-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestDaemonPublishesAndRecords(t *testing.T) {
 	// dirty. The client rejects such a path as corruption, so it is not
 	// cosmetic even if it never got that far.
 	for _, p := range got {
-		if strings.HasPrefix(p, LoDir+"/") {
+		if strings.HasPrefix(p, QinDir+"/") {
 			t.Fatalf("the daemon journalled its own state: %q", p)
 		}
 	}

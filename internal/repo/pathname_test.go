@@ -89,7 +89,7 @@ func TestBackslashNameRoundTrip(t *testing.T) {
 		t.Skip("a backslash name cannot exist on Windows; hostPathError covers the refusal")
 	}
 
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestRestoreSkipsUnrepresentableName(t *testing.T) {
 	hostGOOS = func() string { return "windows" }
 	defer func() { hostGOOS = old }()
 
-	base, err := ioutil.TempDir("", "lo-test-*")
+	base, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

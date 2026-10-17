@@ -20,7 +20,7 @@ import (
 // find out. Skipping would hide exactly the failure they were written for.
 func windowsRepo(t *testing.T) (*Repository, string) {
 	t.Helper()
-	dir, err := ioutil.TempDir("", "lo-test-watch-*")
+	dir, err := ioutil.TempDir("", "qin-test-watch-*")
 	if err != nil {
 		t.Fatal(err)
 	}

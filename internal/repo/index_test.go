@@ -11,7 +11,7 @@ import (
 )
 
 func TestAddAndListFiles(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestAddAndListFiles(t *testing.T) {
 }
 
 func TestAddMultipleFiles(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestAddMultipleFiles(t *testing.T) {
 }
 
 func TestRemoveFile(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestRemoveFile(t *testing.T) {
 }
 
 func TestAddDirectoryRejected(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestAddDirectoryRejected(t *testing.T) {
 }
 
 func TestIndexPersists(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestIndexPersists(t *testing.T) {
 }
 
 func TestAddFileOutsideRepo(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestAddFileOutsideRepo(t *testing.T) {
 // through: filepath.Rel does not fail on a "../" path, it returns one, so the
 // guard has to inspect the result rather than just the error.
 func TestAddFileOutsideRepoRelativeForm(t *testing.T) {
-	base, err := ioutil.TempDir("", "lo-test-*")
+	base, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestAddFileOutsideRepoRelativeForm(t *testing.T) {
 // arrive from a hand-edited index — and asserts that restore refuses to act
 // on it rather than writing through the "../".
 func TestRestoreFileOutsideRepo(t *testing.T) {
-	base, err := ioutil.TempDir("", "lo-test-*")
+	base, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestRestoreFileOutsideRepo(t *testing.T) {
 }
 
 func TestAddPlaceholderRejected(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestAddPlaceholderRejected(t *testing.T) {
 	}
 
 	// Write placeholder file to working tree
-	if err := ioutil.WriteFile(filepath.Join(dir, "large.bin"), []byte("lo-lfs"), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(dir, "large.bin"), []byte("qin-lfs"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -434,7 +434,7 @@ func TestIndexBinaryRoundTrip(t *testing.T) {
 // TestIndexJSONMigration verifies a legacy JSON index is loaded and rewritten
 // in the binary format.
 func TestIndexJSONMigration(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +481,7 @@ func TestIndexJSONMigration(t *testing.T) {
 }
 
 func TestIndexCorrupt(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestIndexCorrupt(t *testing.T) {
 }
 
 func TestAddNonPlaceholderWithSameContent(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,9 +533,9 @@ func TestAddNonPlaceholderWithSameContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A file that happens to have content "lo-lfs" but no lazy index entry
+	// A file that happens to have content "qin-lfs" but no lazy index entry
 	// should be addable normally
-	if err := ioutil.WriteFile(filepath.Join(dir, "f.txt"), []byte("lo-lfs"), 0644); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(dir, "f.txt"), []byte("qin-lfs"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -548,7 +548,7 @@ func TestAddNonPlaceholderWithSameContent(t *testing.T) {
 // unchanged file reports no change, while new/changed content or a new OS
 // variant still does.
 func TestAddFileToIndexChanged(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func TestAddFileToIndexChanged(t *testing.T) {
 // shared locations like /tmp itself.
 func newTempRepo(t *testing.T) (*Repository, string) {
 	t.Helper()
-	root, err := ioutil.TempDir("", "lo-test-*")
+	root, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -830,7 +830,7 @@ func TestAddFileToIndexRefusesRepoMetadata(t *testing.T) {
 			t.Errorf("AddFileToIndex accepted %s", p)
 			continue
 		}
-		if !strings.Contains(err.Error(), LoDir) {
+		if !strings.Contains(err.Error(), QinDir) {
 			t.Errorf("AddFileToIndex refused %s with %q, want the metadata reason", p, err)
 		}
 	}

@@ -790,7 +790,7 @@ func (d *daemon) serve(w, cw watcher, jw *journalWriter, info *fsmonitorDaemonIn
 // It runs on the slow tick, so it costs a handful of file reads every couple
 // of seconds and is never on the path of a change.
 func (d *daemon) supervise(gen uint64) error {
-	if _, err := os.Stat(d.r.LoDir()); err != nil {
+	if _, err := os.Stat(d.r.QinDir()); err != nil {
 		// The repository itself is gone. There is nothing left to watch, and
 		// nothing to report to.
 		return errDaemonStopped

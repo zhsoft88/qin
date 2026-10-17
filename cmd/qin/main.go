@@ -2228,7 +2228,7 @@ func runSubmodule(args []string) error {
 			initFlag = true
 			rest = rest[1:]
 		}
-		mods, err := repo.LoadLoModules(r)
+		mods, err := repo.LoadQinModules(r)
 		if err != nil {
 			return err
 		}
@@ -2259,7 +2259,7 @@ func runSubmodule(args []string) error {
 		if err != nil {
 			return err
 		}
-		mods, err := repo.LoadLoModules(r)
+		mods, err := repo.LoadQinModules(r)
 		if err != nil {
 			return err
 		}
@@ -2300,7 +2300,7 @@ func humanSize(bytes int64) string {
 	return fmt.Sprintf("%d MB", bytes/(1024*1024))
 }
 func cloneSubmodules(r *repo.Repository) error {
-	mods, err := repo.LoadLoModules(r)
+	mods, err := repo.LoadQinModules(r)
 	if err != nil {
 		return err
 	}

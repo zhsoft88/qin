@@ -28,7 +28,7 @@ import (
 // makes that case deterministic rather than dependent on where TMPDIR points.
 func fseventsRepo(t *testing.T) (*Repository, string) {
 	t.Helper()
-	dir, err := ioutil.TempDir("", "lo-test-fsevents-*")
+	dir, err := ioutil.TempDir("", "qin-test-fsevents-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestFseventsWatcherReportsRemovedDirectoryAsLost(t *testing.T) {
 // failure this whole design exists to make impossible. Watching through a
 // symlink makes that case deterministic, whatever TMPDIR happens to be.
 func TestFseventsWatcherFollowsSymlinksToTheRepository(t *testing.T) {
-	real, err := ioutil.TempDir("", "lo-test-fsevents-real-*")
+	real, err := ioutil.TempDir("", "qin-test-fsevents-real-*")
 	if err != nil {
 		t.Fatal(err)
 	}

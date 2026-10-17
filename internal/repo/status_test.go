@@ -14,7 +14,7 @@ import (
 )
 
 func TestStatusClean(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestStatusClean(t *testing.T) {
 }
 
 func TestStatusUntracked(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestStatusUntracked(t *testing.T) {
 }
 
 func TestStatusModified(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestStatusModified(t *testing.T) {
 }
 
 func TestStatusDeleted(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestStatusDeleted(t *testing.T) {
 // recorded mtime is reported clean without hashing, and a same-size rewrite
 // (with a bumped mtime) is still detected as modified.
 func TestStatusStatFastPath(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestStatusStatFastPath(t *testing.T) {
 // TestStatusFastPathAfterCheckout verifies restoreCommit records mtimes so a
 // status right after checkout/rebase/merge doesn't re-hash everything.
 func TestStatusFastPathAfterCheckout(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestStatusFastPathAfterCheckout(t *testing.T) {
 // TestStatusUntrackedDirPruning verifies that an untracked directory with no
 // tracked content is reported as a single entry without descending.
 func TestStatusUntrackedDirPruning(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestStatusUntrackedDirPruning(t *testing.T) {
 
 // TestStatusIgnoredDirPruned verifies an ignored directory is skipped entirely.
 func TestStatusIgnoredDirPruned(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestStatusIgnoredDirPruned(t *testing.T) {
 // TestStatusIgnoredDirWithNegate verifies re-include rules force the walk to
 // descend into ignored directories so re-included children are still listed.
 func TestStatusIgnoredDirWithNegate(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestStatusIgnoredDirWithNegate(t *testing.T) {
 // results are correct on cache hits, new untracked files are found after a
 // directory mtime change, and ignore-rule changes invalidate the cache.
 func TestStatusUntrackedCache(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +449,7 @@ func TestStatusUntrackedCache(t *testing.T) {
 // untracked file to the index invalidates the cache (index mtime changed),
 // so the file is no longer reported as untracked.
 func TestStatusUntrackedCacheIndexInvalidation(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -488,7 +488,7 @@ func TestStatusUntrackedCacheIndexInvalidation(t *testing.T) {
 // TestStatusTrackedEmptyDir verifies a tracked empty directory is not
 // reported as untracked.
 func TestStatusTrackedEmptyDir(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,8 +524,8 @@ func TestStatusTrackedEmptyDir(t *testing.T) {
 	}
 }
 
-func TestStatusSkipsLoDir(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+func TestStatusSkipsQinDir(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestStatusSkipsLoDir(t *testing.T) {
 	}
 
 	// Create a file inside .qin (should be ignored)
-	ioutil.WriteFile(filepath.Join(dir, LoDir, "test-file"), []byte("should be ignored"), 0644)
+	ioutil.WriteFile(filepath.Join(dir, QinDir, "test-file"), []byte("should be ignored"), 0644)
 
 	s, err := repo.WorkTreeStatus()
 	if err != nil {
@@ -545,7 +545,7 @@ func TestStatusSkipsLoDir(t *testing.T) {
 	}
 
 	if len(s.Untracked) != 0 {
-		t.Fatalf("expected 0 untracked (lo dir skipped), got %v", s.Untracked)
+		t.Fatalf("expected 0 untracked (qin dir skipped), got %v", s.Untracked)
 	}
 }
 
@@ -564,7 +564,7 @@ func renderProgressLine(s string) string {
 
 func TestPrintProgressErasesTail(t *testing.T) {
 	old := os.Stderr
-	f, err := ioutil.TempFile("", "lo-progress-*")
+	f, err := ioutil.TempFile("", "qin-progress-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +613,7 @@ func TestPrintProgressErasesTail(t *testing.T) {
 // untracked when created locally, instead of being swallowed as "tracked"
 // and reported clean.
 func TestStatusOtherOSVariantUntracked(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +646,7 @@ func TestStatusOtherOSVariantUntracked(t *testing.T) {
 	linuxView := map[uint8]bool{OSLinux: true}
 	// The untracked cache is not OS-filter-aware; drop it between views so
 	// each filtered status scans fresh.
-	cachePath := filepath.Join(dir, LoDir, "untracked-cache.json")
+	cachePath := filepath.Join(dir, QinDir, "untracked-cache.json")
 
 	// Fresh clone on linux: nothing on disk → clean
 	os.Remove(cachePath)
@@ -688,7 +688,7 @@ func TestStatusOtherOSVariantUntracked(t *testing.T) {
 // reported as staged: the HEAD tree comparison must match the same variant
 // (composite key), not just the path name.
 func TestStatusStagedOSVariants(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -761,7 +761,7 @@ func TestStatusStagedOSVariants(t *testing.T) {
 // neither the index nor the working tree. Before StagedDeleted existed, every
 // list below was empty and status said the tree was clean.
 func TestStatusStagedDeletion(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -816,7 +816,7 @@ func TestStatusStagedDeletion(t *testing.T) {
 // disk, so the same path is simultaneously a staged deletion and untracked —
 // the same pair git reports.
 func TestStatusStagedDeletionCached(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +860,7 @@ func TestStatusStagedDeletionCached(t *testing.T) {
 // status compares the HEAD tree against the index — so an equality test is the
 // only thing that keeps them from drifting apart again.
 func TestStatusStagedDeletionMatchesDiffIndex(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -923,7 +923,7 @@ func TestStatusStagedDeletionMatchesDiffIndex(t *testing.T) {
 // index entry for the current OS only is the same path, not a deletion — a
 // composite-key comparison would call it one.
 func TestStatusStagedDeletionOSFiltered(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1059,7 +1059,7 @@ func TestStatusSymlinkComparedByTarget(t *testing.T) {
 // output — it made every index entry look staged. Reporting that as a clean
 // run is a wrong answer wearing the shape of a right one.
 func TestStatusRefusesUnreadableHEADSide(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,7 @@ type dirCacheEnt struct {
 const untrackedCacheFileName = "untracked-cache.json"
 
 func (r *Repository) untrackedCachePath() string {
-	return filepath.Join(r.LoDir(), untrackedCacheFileName)
+	return filepath.Join(r.QinDir(), untrackedCacheFileName)
 }
 
 // loadUntrackedCache reads the cache, returning an empty one when missing or corrupt.

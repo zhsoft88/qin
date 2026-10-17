@@ -12,7 +12,7 @@ import (
 )
 
 func TestSaveLoadListRemoveRemote(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,13 +57,13 @@ func TestSaveLoadListRemoveRemote(t *testing.T) {
 }
 
 func TestFetchFirstTime(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	localDir, err := ioutil.TempDir("", "lo-local-*")
+	localDir, err := ioutil.TempDir("", "qin-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,13 +112,13 @@ func TestFetchFirstTime(t *testing.T) {
 }
 
 func TestFetchUpToDate(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	localDir, err := ioutil.TempDir("", "lo-local-*")
+	localDir, err := ioutil.TempDir("", "qin-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,13 +150,13 @@ func TestFetchUpToDate(t *testing.T) {
 }
 
 func TestPushFirstTime(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	localDir, err := ioutil.TempDir("", "lo-local-*")
+	localDir, err := ioutil.TempDir("", "qin-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,13 +208,13 @@ func TestPushFirstTime(t *testing.T) {
 }
 
 func TestPushIncremental(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	localDir, err := ioutil.TempDir("", "lo-local-*")
+	localDir, err := ioutil.TempDir("", "qin-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,13 +270,13 @@ func TestPushIncremental(t *testing.T) {
 }
 
 func TestPullFastForward(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	localDir, err := ioutil.TempDir("", "lo-local-*")
+	localDir, err := ioutil.TempDir("", "qin-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,13 +335,13 @@ func TestPullFastForward(t *testing.T) {
 }
 
 func TestPullThreeWay(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	localDir, err := ioutil.TempDir("", "lo-local-*")
+	localDir, err := ioutil.TempDir("", "qin-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,13 +430,13 @@ func TestPullThreeWay(t *testing.T) {
 }
 
 func TestClone(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-source-*")
+	remoteDir, err := ioutil.TempDir("", "qin-source-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	cloneDir, err := ioutil.TempDir("", "lo-clone-*")
+	cloneDir, err := ioutil.TempDir("", "qin-clone-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,13 +491,13 @@ func TestClone(t *testing.T) {
 }
 
 func TestCollectTreeChunks(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	boundaryDir, err := ioutil.TempDir("", "lo-boundary-*")
+	boundaryDir, err := ioutil.TempDir("", "qin-boundary-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +585,7 @@ func TestCollectTreeChunks(t *testing.T) {
 }
 
 func TestPushPullNonExistentRemote(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +610,7 @@ func TestPushPullNonExistentRemote(t *testing.T) {
 }
 
 func TestObjectTypeAllTypes(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -694,13 +694,13 @@ func TestObjectTypeAllTypes(t *testing.T) {
 }
 
 func TestLazyCloneAndLfsPull(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-source-*")
+	remoteDir, err := ioutil.TempDir("", "qin-source-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	cloneDir, err := ioutil.TempDir("", "lo-clone-*")
+	cloneDir, err := ioutil.TempDir("", "qin-clone-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -765,7 +765,7 @@ func TestLazyCloneAndLfsPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "lo-lfs" {
+	if string(data) != "qin-lfs" {
 		t.Fatalf("expected placeholder for large file, got %q", data)
 	}
 
@@ -818,7 +818,7 @@ func TestLazyCloneAndLfsPull(t *testing.T) {
 }
 
 func TestLfsStatusNoLargeFiles(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -907,7 +907,7 @@ func localOrigin(remoteDir string) string { return remoteDir }
 // the HTTP transports; it is called once the remote repository exists.
 func newRewindFixture(t *testing.T, origin func(remoteDir string) string) *rewindFixture {
 	t.Helper()
-	root, err := ioutil.TempDir("", "lo-rewind-*")
+	root, err := ioutil.TempDir("", "qin-rewind-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1071,7 +1071,7 @@ func TestPushUpToDateIsNoOp(t *testing.T) {
 // whose objects are all present must still finish that ref rather than report
 // "everything up to date" and stop.
 func TestPushCompletesInterruptedRefUpdate(t *testing.T) {
-	root, err := ioutil.TempDir("", "lo-test-*")
+	root, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1149,7 +1149,7 @@ func TestPushCompletesInterruptedRefUpdate(t *testing.T) {
 // and returns it with its path.
 func newTargetDir(t *testing.T, bare bool) (*Repository, string) {
 	t.Helper()
-	dir, err := ioutil.TempDir("", "lo-target-*")
+	dir, err := ioutil.TempDir("", "qin-target-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1169,7 +1169,7 @@ func newTargetDir(t *testing.T, bare bool) (*Repository, string) {
 // checkout with one commit on main and origin already saved.
 func pusherWithCommit(t *testing.T, targetURL string) *Repository {
 	t.Helper()
-	dir, err := ioutil.TempDir("", "lo-pusher-*")
+	dir, err := ioutil.TempDir("", "qin-pusher-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1337,7 +1337,7 @@ func TestPushToDetachedHeadTargetAllowed(t *testing.T) {
 
 	// The pusher's commit is a child of the target's, so only the
 	// checked-out rule could refuse it.
-	pusherDir, err := ioutil.TempDir("", "lo-detached-pusher-*")
+	pusherDir, err := ioutil.TempDir("", "qin-detached-pusher-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1504,12 +1504,12 @@ func TestHeadBranchFromHEAD(t *testing.T) {
 // that looks pushed and cannot be checked out. An object the walk cannot read
 // has to fail the push instead.
 func TestPushRefusesMissingTree(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
-	localDir, err := ioutil.TempDir("", "lo-local-*")
+	localDir, err := ioutil.TempDir("", "qin-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,7 @@
 # Binaries
 /dist/
-/lo
-/lo.exe
+/qin
+/qin.exe
 *.exe
 
 # Temp scripts

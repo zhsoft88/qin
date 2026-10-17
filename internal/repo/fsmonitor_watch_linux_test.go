@@ -29,7 +29,7 @@ func requireInotify(t *testing.T) {
 func inotifyRepo(t *testing.T) (*Repository, string) {
 	t.Helper()
 	requireInotify(t)
-	dir, err := ioutil.TempDir("", "lo-test-inotify-*")
+	dir, err := ioutil.TempDir("", "qin-test-inotify-*")
 	if err != nil {
 		t.Fatal(err)
 	}

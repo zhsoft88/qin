@@ -13,7 +13,7 @@ import (
 )
 
 func TestCommitsBetween(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-*")
+	dir, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestCommitsBetween(t *testing.T) {
 }
 
 func TestFormatPatchRoundTrip(t *testing.T) {
-	srcDir, err := ioutil.TempDir("", "lo-src-*")
+	srcDir, err := ioutil.TempDir("", "qin-src-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestFormatPatchRoundTrip(t *testing.T) {
 	}
 
 	// Apply the series to a fresh repo
-	dstDir, err := ioutil.TempDir("", "lo-dst-*")
+	dstDir, err := ioutil.TempDir("", "qin-dst-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestParsePatchFileRoundTrip(t *testing.T) {
 // joined straight onto the repository root, so without a guard a patch whose
 // path is "../x" writes outside the working tree entirely.
 func TestApplyPatchOutsideRepo(t *testing.T) {
-	base, err := ioutil.TempDir("", "lo-test-*")
+	base, err := ioutil.TempDir("", "qin-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

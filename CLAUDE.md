@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+`README.md` is the user-facing feature overview and command reference (in Chinese). It is the source of truth for the CLI surface; keep it in sync when commands, flags, or config keys change. This file covers what the README does not: the invariants behind the behavior.
+
 ## Commands
 
 - **Build (Linux/Mac)**: `mkdir -p dist && go build -o dist/qin ./cmd/qin`
@@ -15,6 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Run binary (after build)**: `./dist/qin <command>`
 - **Change monitor (dev)**: `./dist/qin config core.fsmonitor true`, then `./dist/qin fsmonitor--daemon start|run|stop|status` (`run` is the foreground daemon)
 - **Platform backend tests**: each must run on its own OS — `go test ./internal/repo/ -run 'Inotify|Fsmonitor' -v` on Linux, `-run Windows` on Windows, `-run Fsevents` on macOS. Never cross-compile to check them.
+- **Symlink tests on Windows**: `TestTreePathThroughSymlinkedParentCannotEscapeRepo` and `TestTreeEntryReplacingSymlinkCannotEscapeRepo` (tree_test.go) create real symlinks. Without Developer Mode or an elevated shell, Windows fails them with `A required privilege is not held by the client` — an environment limit, not a code failure. Enable Developer Mode to run the full suite.
 
 ## Code Architecture
 
@@ -32,7 +35,7 @@ qin is a Git-inspired, content-addressed version control system in Go 1.15+ (std
   - **`store.go`** — Object read/write at `.qin/objects/XX/YYYYYY` (Git-style 2-char subdir). `StoreObject` uses atomic temp+rename. `FindObjectByPrefix` resolves short hashes
   - **`index.go`** — Staging area at `.qin/index` (binary, "QINIDX" magic; legacy JSON migrated on load). `IndexEntry` has Hash, ContentHash, Size, Mode, Lazy, Mtime, OSS (uint8 bitmask: 1=win, 2=mac, 4=linux). Composite keys `"path\0<oss_mask>"` enable OS-specific variants
   - **`tree.go`** — `Tree` (ordered `TreeEntry` list) / `Commit` (tree hash + parents + author + message + time). `WriteTree` builds from index, `WriteCommit` creates commit + updates branch ref
-  - **All other files** handle one operation each: status, diff, merge (BFS merge-base + 3-way), rebase, stash, checkout/switch/branch, reset/restore, patch, remote push/fetch/pull/clone, serve (HTTP server), GC, submodules, config, ignore, change monitor (`fsmonitor*.go` — see below)
+  - **All other files** handle one operation each: status, diff, merge (BFS merge-base + 3-way), rebase, cherry-pick, stash, checkout/switch/branch, reset/restore, patch (`patch.go`, plus `formatpatch.go` for `format-patch`/`am`), remote push/fetch/pull/clone, serve (HTTP server), GC, submodules, config, ignore, untracked-directory cache (`untracked_cache.go`), `log --graph` (`graph.go`), dangling-commit discovery for `lost-found` (`lostfound.go`), the tree-name rule (`pathname.go`), the binary index codec (`index_binary.go`), and the change monitor (`fsmonitor*.go` — see below)
 
 ### Cross-Platform OS Variant System
 
@@ -69,7 +72,7 @@ Files added via `add` go through `StoreChunkedFile()`:
 1. `core.NewChunker` splits data at content-defined boundaries (Gear hash)
 2. Single-chunk files store as plain `ObjectBlob`; multi-chunk files store each chunk as a blob and produce an `ObjectChunkManifest`
 3. `LoadFileContent()` reads back: if the hash is a manifest → reassemble chunks; if a plain blob → return directly
-4. LFS lazy mode: clone with `--lazy` skips chunk blobs; files on disk get `"lo-lfs"` placeholder; `lfs pull` fetches real chunks
+4. LFS lazy mode: clone with `--lazy` skips chunk blobs; files on disk get `"qin-lfs"` placeholder; `lfs pull` fetches real chunks
 
 ### Remote Transport
 
@@ -129,7 +132,10 @@ The invariant every other decision serves: **the monitor may only remove work, n
 ```
 .qin/
   HEAD                — "ref: refs/heads/main" or a commit hash
-  config              — JSON config (chunk sizes, diff limits, user, core.fsmonitor, core.bare)
+  config              — JSON config: core.chunk_min_size, core.chunk_threshold,
+                        core.chunk_max_size, core.fsmonitor, core.bare,
+                        diff.max_size, diff.max_lines, user.name, user.email
+                        (the key list and defaults live in `configKeys`, config.go)
   index               — binary staging area (QINIDX v1; JSON auto-migrated)
   untracked-cache.json— per-directory untracked lists for fast status (git core.untrackedCache style)
   objects/            — Git-style XX/YYYYYY hash layout
@@ -153,15 +159,15 @@ The invariant every other decision serves: **the monitor may only remove work, n
 
 Only the root `.qin` counts. A nested directory that happens to be called `.qin` is ordinary content, and so is a submodule's own metadata — reached through its configured path, never by name here. `.qinignore` is deliberately **not** in this class: it is a file the user may track, like `.gitignore`, and both `add` and `status` treat it as one — `status` used to hide it from the untracked list by name, which made it clean in status and present in the committed tree at the same time.
 
-### Legacy Naming
+### Naming
 
-The project was originally named "lo" and now calls itself `qin` everywhere it
-names itself: the usage banner, every `usage: ...` error, and `--version` all
-read `core.Name`, which is the single definition of the name. Do not spell it
-out at a call site — a hardcoded name is how the banner and the messages drifted
-apart the first time.
+Everything the project names after itself is `qin`: the usage banner, every
+`usage: ...` error, and `--version` all read `core.Name`, which is the single
+definition of the name. Do not spell it out at a call site — a hardcoded name is
+how the banner and the messages drifted apart the first time.
 
-The legacy name survives only where it is **data rather than display**: the
-`"lo-lfs"` placeholder written into files by a lazy clone and compared against
-on load is a format value, and renaming it would make existing clones stop
-recognising their own placeholders. The config type is `Config`, not `LoConfig`.
+The names that outlive a process follow the same rule: the metadata directory is
+`.qin` (the `repo.QinDir` constant), the submodule manifest is `.qinmodules`, and
+the lazy-clone placeholder is `"qin-lfs"`. Changing any of those is a data-format
+change, not a display change: existing repositories and clones hold the old
+spelling.

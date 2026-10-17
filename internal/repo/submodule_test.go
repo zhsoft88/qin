@@ -22,8 +22,8 @@ func TestIsSubmoduleMode(t *testing.T) {
 	}
 }
 
-func TestLoadLoModulesMissing(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-modules-*")
+func TestLoadQinModulesMissing(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-modules-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,20 +34,20 @@ func TestLoadLoModulesMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mods, err := LoadLoModules(r)
+	mods, err := LoadQinModules(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mods == nil {
-		t.Fatal("expected non-nil LoModules")
+		t.Fatal("expected non-nil QinModules")
 	}
 	if len(mods.Submodules) != 0 {
 		t.Fatalf("expected empty submodules, got %d", len(mods.Submodules))
 	}
 }
 
-func TestSaveAndLoadLoModules(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-modules-*")
+func TestSaveAndLoadQinModules(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-modules-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,23 +58,23 @@ func TestSaveAndLoadLoModules(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mods := &LoModules{
+	mods := &QinModules{
 		Submodules: map[string]SubmoduleDef{
 			"lib/foo": {URL: "https://github.com/user/repo"},
 		},
 	}
 
-	if err := SaveLoModules(r, mods); err != nil {
+	if err := SaveQinModules(r, mods); err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify file exists and is valid JSON
-	data, err := ioutil.ReadFile(filepath.Join(dir, ".lomodules"))
+	data, err := ioutil.ReadFile(filepath.Join(dir, ".qinmodules"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var parsed LoModules
+	var parsed QinModules
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +90,8 @@ func TestSaveAndLoadLoModules(t *testing.T) {
 		t.Fatalf("expected URL https://github.com/user/repo, got %s", def.URL)
 	}
 
-	// Reload via LoadLoModules
-	loaded, err := LoadLoModules(r)
+	// Reload via LoadQinModules
+	loaded, err := LoadQinModules(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestSaveAndLoadLoModules(t *testing.T) {
 }
 
 func TestAddSubmoduleIndexEntry(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-submodule-*")
+	dir, err := ioutil.TempDir("", "qin-submodule-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestAddSubmoduleIndexEntry(t *testing.T) {
 	}
 
 	// Create a mini repo to use as submodule
-	subDir, err := ioutil.TempDir("", "lo-sub-repo-*")
+	subDir, err := ioutil.TempDir("", "qin-sub-repo-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestAddSubmoduleIndexEntry(t *testing.T) {
 }
 
 func TestBuildTreeWithSubmodule(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-tree-sub-*")
+	dir, err := ioutil.TempDir("", "qin-tree-sub-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestBuildTreeWithSubmodule(t *testing.T) {
 }
 
 func TestRestoreCommitWithSubmodule(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-restore-sub-*")
+	dir, err := ioutil.TempDir("", "qin-restore-sub-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestRestoreCommitWithSubmodule(t *testing.T) {
 }
 
 func TestCollectTreeRecSkipsSubmodule(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-collect-sub-*")
+	dir, err := ioutil.TempDir("", "qin-collect-sub-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestCollectTreeRecSkipsSubmodule(t *testing.T) {
 	}
 
 	// Create another repo as the "remote" to test collectTreeRec
-	remoteDir, err := ioutil.TempDir("", "lo-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +374,7 @@ func TestCollectTreeRecSkipsSubmodule(t *testing.T) {
 }
 
 func TestSubmoduleCollectTreeRecSkipsEntry(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-collect-sub2-*")
+	dir, err := ioutil.TempDir("", "qin-collect-sub2-*")
 	if err != nil {
 		t.Fatal(err)
 	}

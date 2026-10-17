@@ -24,13 +24,13 @@ func startRepoServer(t *testing.T, repoPath string) *httptest.Server {
 }
 
 func TestHTTPFetch(t *testing.T) {
-	sourceDir, err := ioutil.TempDir("", "lo-http-source-*")
+	sourceDir, err := ioutil.TempDir("", "qin-http-source-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(sourceDir)
 
-	localDir, err := ioutil.TempDir("", "lo-http-local-*")
+	localDir, err := ioutil.TempDir("", "qin-http-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,13 +91,13 @@ func TestHTTPFetch(t *testing.T) {
 }
 
 func TestHTTPPush(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-http-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-http-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	localDir, err := ioutil.TempDir("", "lo-http-local-*")
+	localDir, err := ioutil.TempDir("", "qin-http-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,13 +153,13 @@ func TestHTTPPush(t *testing.T) {
 }
 
 func TestHTTPClone(t *testing.T) {
-	sourceDir, err := ioutil.TempDir("", "lo-http-source-*")
+	sourceDir, err := ioutil.TempDir("", "qin-http-source-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(sourceDir)
 
-	cloneDir, err := ioutil.TempDir("", "lo-http-clone-*")
+	cloneDir, err := ioutil.TempDir("", "qin-http-clone-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,13 +218,13 @@ func TestHTTPClone(t *testing.T) {
 }
 
 func TestHTTPPushIncremental(t *testing.T) {
-	remoteDir, err := ioutil.TempDir("", "lo-http-remote-*")
+	remoteDir, err := ioutil.TempDir("", "qin-http-remote-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(remoteDir)
 
-	localDir, err := ioutil.TempDir("", "lo-http-local-*")
+	localDir, err := ioutil.TempDir("", "qin-http-local-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,13 +287,13 @@ func TestHTTPPushIncremental(t *testing.T) {
 }
 
 func TestHTTPLazyCloneAndLfsPull(t *testing.T) {
-	sourceDir, err := ioutil.TempDir("", "lo-http-source-*")
+	sourceDir, err := ioutil.TempDir("", "qin-http-source-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(sourceDir)
 
-	cloneDir, err := ioutil.TempDir("", "lo-http-clone-*")
+	cloneDir, err := ioutil.TempDir("", "qin-http-clone-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestHTTPLazyCloneAndLfsPull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "lo-lfs" {
+	if string(data) != "qin-lfs" {
 		t.Fatalf("expected placeholder for large file, got %q", data)
 	}
 
@@ -396,7 +396,7 @@ func TestHTTPLazyCloneAndLfsPull(t *testing.T) {
 }
 
 func TestHTTPRefList(t *testing.T) {
-	sourceDir, err := ioutil.TempDir("", "lo-http-refs-*")
+	sourceDir, err := ioutil.TempDir("", "qin-http-refs-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -483,7 +483,7 @@ func TestSSHParseURL(t *testing.T) {
 }
 
 func TestSSHURLDetection(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-ssh-detect-*")
+	dir, err := ioutil.TempDir("", "qin-ssh-detect-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +529,7 @@ func TestSSHURLDetection(t *testing.T) {
 }
 
 func TestRemoteBranchesHTTP(t *testing.T) {
-	sourceDir, err := ioutil.TempDir("", "lo-http-branches-*")
+	sourceDir, err := ioutil.TempDir("", "qin-http-branches-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +639,7 @@ func putRef(t *testing.T, baseURL, path, body string) (*http.Response, string) {
 // written PUT has no client-side preflight behind it, and objects are always
 // uploaded before refs, so by the time this runs the target can decide.
 func TestServeRefPutRefusesNonFastForward(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-serve-put-*")
+	dir, err := ioutil.TempDir("", "qin-serve-put-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +701,7 @@ func TestServeRefPutRefusesNonFastForward(t *testing.T) {
 // open: the ref path is joined onto .qin, so "refs/../../evil" would write a
 // file outside the repository.
 func TestServeRefPutRejectsUnsafeRefName(t *testing.T) {
-	root, err := ioutil.TempDir("", "lo-serve-ref-*")
+	root, err := ioutil.TempDir("", "qin-serve-ref-*")
 	if err != nil {
 		t.Fatal(err)
 	}

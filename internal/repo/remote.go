@@ -21,7 +21,7 @@ type Remote struct {
 
 // SaveRemote writes a remote URL to .qin/remotes/<name>.
 func (r *Repository) SaveRemote(name, url string) error {
-	remotesDir := filepath.Join(r.LoDir(), "remotes")
+	remotesDir := filepath.Join(r.QinDir(), "remotes")
 	if err := os.MkdirAll(remotesDir, 0755); err != nil {
 		return err
 	}
@@ -30,7 +30,7 @@ func (r *Repository) SaveRemote(name, url string) error {
 
 // LoadRemote reads the URL for a named remote.
 func (r *Repository) LoadRemote(name string) (string, error) {
-	data, err := ioutil.ReadFile(filepath.Join(r.LoDir(), "remotes", name))
+	data, err := ioutil.ReadFile(filepath.Join(r.QinDir(), "remotes", name))
 	if err != nil {
 		return "", fmt.Errorf("remote not found: %s", name)
 	}
@@ -39,7 +39,7 @@ func (r *Repository) LoadRemote(name string) (string, error) {
 
 // ListRemotes returns all configured remotes.
 func (r *Repository) ListRemotes() ([]Remote, error) {
-	remotesDir := filepath.Join(r.LoDir(), "remotes")
+	remotesDir := filepath.Join(r.QinDir(), "remotes")
 	entries, err := ioutil.ReadDir(remotesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -71,7 +71,7 @@ func (r *Repository) ListRemotes() ([]Remote, error) {
 
 // RemoveRemote deletes a remote configuration.
 func (r *Repository) RemoveRemote(name string) error {
-	return os.Remove(filepath.Join(r.LoDir(), "remotes", name))
+	return os.Remove(filepath.Join(r.QinDir(), "remotes", name))
 }
 
 // ---- LFS / lazy large file support ----

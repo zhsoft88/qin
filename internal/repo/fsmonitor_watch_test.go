@@ -126,7 +126,7 @@ func TestSelectWatcher(t *testing.T) {
 // pollRepo builds a repository directory with a couple of files.
 func pollRepo(t *testing.T) (*Repository, string) {
 	t.Helper()
-	dir, err := ioutil.TempDir("", "lo-test-poll-*")
+	dir, err := ioutil.TempDir("", "qin-test-poll-*")
 	if err != nil {
 		t.Fatal(err)
 	}

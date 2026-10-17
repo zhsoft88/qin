@@ -17,7 +17,7 @@ import (
 
 func newAddRepo(t *testing.T) (*repo.Repository, string) {
 	t.Helper()
-	dir, err := ioutil.TempDir("", "lo-add-*")
+	dir, err := ioutil.TempDir("", "qin-add-*")
 	if err != nil {
 		t.Fatal(err)
 	}
