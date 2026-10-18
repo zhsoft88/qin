@@ -101,7 +101,7 @@ Commands:
   init [--bare] [<path>]
                      Initialize a new repository (default: current dir);
                      --bare marks a push target, which protects no branch
-  add <file>        Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
+  add <file|@file>  Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
   rm [--cached] [-r] <file>   Remove files (--cached keeps on disk)
   commit            Create a commit from staged files
   log [--graph]     Show commit history (--graph for branch visualization)
@@ -198,7 +198,7 @@ func runAdd(args []string) error {
 	args = reorderFlags(args)
 	fs.Parse(args)
 	if fs.NArg() == 0 {
-		return fmt.Errorf("usage: " + core.Name + " add [--os] [--os-match <expr>] [--exclude <glob>] <file> [file...]")
+		return fmt.Errorf("usage: " + core.Name + " add [--os] [--os-match <expr>] [--exclude <glob>] <file|@file> [file...]")
 	}
 	r, err := findRepo()
 	if err != nil {
@@ -227,11 +227,17 @@ func runAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	excludeFlags, err = expandExcludeFiles(excludeFlags, r.Path)
+	// List files are user-supplied paths like every other add argument: they
+	// resolve against the process CWD and may live outside the repository.
+	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	args, err = expandExcludeFiles(fs.Args(), r.Path)
+	excludeFlags, err = expandAtFiles(excludeFlags, cwd)
+	if err != nil {
+		return err
+	}
+	args, err = expandAtFiles(fs.Args(), cwd)
 	if err != nil {
 		return err
 	}
@@ -566,19 +572,34 @@ func relPath(r *repo.Repository, path string) string {
 	return filepath.ToSlash(rel)
 }
 
-// expandExcludeFiles reads any exclude pattern starting with '@' as a file,
-// replacing it with the non-blank, non-comment lines from that file.
-func expandExcludeFiles(excludes []string, repoPath string) ([]string, error) {
+// expandAtFiles replaces each item of the form @file with the non-blank,
+// non-comment lines of that file. Both add's positional arguments and its
+// --exclude values go through this one expander.
+//
+// The file path is a user-supplied path like any other: it resolves against
+// baseDir (the process CWD at the call site) unless absolute. Consuming
+// absolute paths through filepath.Join would be wrong — Go's Join keeps the
+// base, so Join("/repo", "/tmp/list") is "/repo/tmp/list", not "/tmp/list".
+// The file may therefore live anywhere, including outside the repository.
+//
+// Lines are returned verbatim apart from trimming: the add walkers resolve
+// them against the CWD exactly like literal arguments, and addFileToIndex is
+// what rejects an entry that escapes the repository. Only the command line is
+// expanded — a line starting with @ is a literal name, not another list.
+func expandAtFiles(items []string, baseDir string) ([]string, error) {
 	var out []string
-	for _, p := range excludes {
+	for _, p := range items {
 		if !strings.HasPrefix(p, "@") {
 			out = append(out, p)
 			continue
 		}
-		f := filepath.Join(repoPath, p[1:])
+		f := p[1:]
+		if !filepath.IsAbs(f) {
+			f = filepath.Join(baseDir, f)
+		}
 		data, err := ioutil.ReadFile(f)
 		if err != nil {
-			return nil, fmt.Errorf("read exclude file %s: %w", f, err)
+			return nil, fmt.Errorf("read @file %s: %w", f, err)
 		}
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
@@ -588,32 +609,6 @@ func expandExcludeFiles(excludes []string, repoPath string) ([]string, error) {
 		}
 	}
 	return out, nil
-}
-
-// expandArgFiles is like expandExcludeFiles but silently falls back
-// to the literal path when the file doesn't exist.
-func expandArgFiles(args []string, repoPath string) []string {
-	var out []string
-	for _, p := range args {
-		if !strings.HasPrefix(p, "@") {
-			out = append(out, p)
-			continue
-		}
-		f := filepath.Join(repoPath, p[1:])
-		data, err := ioutil.ReadFile(f)
-		if err != nil {
-			// @file not found - fall back to literal path
-			out = append(out, p[1:])
-			continue
-		}
-		for _, line := range strings.Split(string(data), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
-				out = append(out, line)
-			}
-		}
-	}
-	return out
 }
 
 func pathExcluded(r *repo.Repository, path string, excludes []string) bool {

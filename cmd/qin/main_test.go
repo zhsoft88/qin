@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -29,6 +30,43 @@ func newAddRepo(t *testing.T) (*repo.Repository, string) {
 		t.Fatal(err)
 	}
 	return r, dir
+}
+
+// newRepoWithParent creates the repository in parent/repo and returns the
+// parent too, so a test can put a list file outside the repository.
+func newRepoWithParent(t *testing.T) (*repo.Repository, string, string) {
+	t.Helper()
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "repo")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := repo.Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, dir, parent
+}
+
+// chdir changes the process working directory for the rest of the test. The
+// cmd/qin tests do not run in parallel, so a process-wide chdir is safe here;
+// update this comment if that ever changes. Cleanups are LIFO, so this restore
+// runs before t.TempDir's removal — which matters on Windows, where the tree
+// cannot be removed while it is the current directory.
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(old); err != nil {
+			t.Errorf("restore cwd: %v", err)
+		}
+	})
 }
 
 func writeAt(t *testing.T, dir, rel, content string) {
@@ -414,5 +452,166 @@ func TestPlainAddKeepsOSVariant(t *testing.T) {
 	e := entryAt(t, idx, "pkg/thing.txt")
 	if e.ContentHash != core.HashFromBytes([]byte("two")) {
 		t.Error("plain add did not update the visible variant")
+	}
+}
+
+// TestExpandAtFiles pins the list-file contract shared by positional add
+// arguments and --exclude: the list path resolves against baseDir unless it is
+// absolute, and its lines are returned verbatim so the walkers treat them like
+// literal arguments.
+func TestExpandAtFiles(t *testing.T) {
+	base := t.TempDir()
+	listDir := t.TempDir()
+
+	absList := filepath.Join(listDir, "files.txt")
+	content := "a.txt\n\n   \n# comment\n  sub/b.txt  \n@literal\n"
+	if err := ioutil.WriteFile(absList, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := expandAtFiles([]string{"plain", "@" + absList}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"plain", "a.txt", "sub/b.txt", "@literal"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expanded %v, want %v", got, want)
+	}
+
+	// Relative list paths, including directory components, resolve against
+	// baseDir. The entries themselves are untouched.
+	if err := os.MkdirAll(filepath.Join(base, "lists"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(base, "lists", "rel.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = expandAtFiles([]string{"@lists/rel.txt"}, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"x"}) {
+		t.Fatalf("relative @file expanded to %v, want [x]", got)
+	}
+
+	// A missing list is a hard error with no literal fallback.
+	if _, err := expandAtFiles([]string{"@nope.txt"}, base); err == nil {
+		t.Fatal("a missing @file must be an error")
+	} else if !strings.Contains(err.Error(), "read @file") {
+		t.Fatalf("error = %v, want it to name the @file", err)
+	}
+}
+
+// TestRunAddPositionalAtFileExternal drives the real command: the list file
+// lives outside the repository, and its entries resolve from the process CWD.
+func TestRunAddPositionalAtFileExternal(t *testing.T) {
+	r, repoDir, parent := newRepoWithParent(t)
+	writeAt(t, repoDir, "a.txt", "a")
+	writeAt(t, repoDir, "sub/b.txt", "b")
+	writeAt(t, repoDir, "c.txt", "c")
+
+	listDir := filepath.Join(parent, "lists")
+	if err := os.MkdirAll(listDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	list := filepath.Join(listDir, "files.txt")
+	if err := ioutil.WriteFile(list, []byte("a.txt\nsub/b.txt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, repoDir)
+
+	// Relative @file with directory components, outside the repo.
+	if err := runAdd([]string{"@" + filepath.Join("..", "lists", "files.txt")}); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"a.txt", "sub/b.txt"}) {
+		t.Fatalf("indexed %v, want the two listed files", got)
+	}
+
+	// Absolute @file takes the filepath.IsAbs branch.
+	absList := filepath.Join(listDir, "abs.txt")
+	if err := ioutil.WriteFile(absList, []byte("c.txt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAdd([]string{"@" + absList}); err != nil {
+		t.Fatal(err)
+	}
+	idx, err = r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"a.txt", "c.txt", "sub/b.txt"}) {
+		t.Fatalf("indexed %v, want the third file from the absolute list", got)
+	}
+}
+
+// TestRunAddExcludeAtFileExternal covers the other caller of expandAtFiles:
+// --exclude @file may also point outside the repository.
+func TestRunAddExcludeAtFileExternal(t *testing.T) {
+	r, repoDir, parent := newRepoWithParent(t)
+	writeAt(t, repoDir, "keep.txt", "keep")
+	writeAt(t, repoDir, "debug.log", "log")
+
+	list := filepath.Join(parent, "excludes.txt")
+	if err := ioutil.WriteFile(list, []byte("*.log\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, repoDir)
+
+	if err := runAdd([]string{"--exclude", "@" + list, "."}); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"keep.txt"}) {
+		t.Fatalf("indexed %v, want only keep.txt", got)
+	}
+}
+
+// TestRunAddAtFileEscapingEntryRejected: a list entry is resolved like any
+// other add argument, so one that lands outside the repository is refused by
+// addFileToIndex's existing containment check.
+func TestRunAddAtFileEscapingEntryRejected(t *testing.T) {
+	r, repoDir, parent := newRepoWithParent(t)
+	writeAt(t, repoDir, "a.txt", "a")
+	writeAt(t, parent, "outside.txt", "outside")
+
+	listDir := filepath.Join(parent, "lists")
+	if err := os.MkdirAll(listDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	list := filepath.Join(listDir, "files.txt")
+	if err := ioutil.WriteFile(list, []byte("a.txt\n../outside.txt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, repoDir)
+
+	if err := runAdd([]string{"@" + filepath.Join("..", "lists", "files.txt")}); err == nil {
+		t.Fatal("an entry outside the repository must fail the add")
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"a.txt"}) {
+		t.Fatalf("indexed %v, want only a.txt", got)
+	}
+
+	// Pin the reason: the existing predicate, not a second rule in the
+	// expander, is what refuses it.
+	ignorer, err := r.LoadIgnoreMatcher()
+	if err != nil {
+		t.Fatal(err)
+	}
+	added := 0
+	err = addFileOrDir(r, "../outside.txt", nil, &added, idx, ignorer)
+	if err == nil || !strings.Contains(err.Error(), "path outside repository") {
+		t.Fatalf("addFileOrDir error = %v, want path outside repository", err)
 	}
 }

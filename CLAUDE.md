@@ -70,6 +70,27 @@ Cross-platform intent uses the **OS variant mask** instead of a name ban. `qin a
 
 `AddFileToIndex` still consults `.qinignore` **before** the name rule, though the reason is now simply that an ignored path should not be considered at all: `qin add .` must not fail over a file the user has already declared out of scope. The ignore refusal is `ErrIgnored`, an error so that `add <path>` names it but one the walks subtract with `errors.Is` — a file a walk passes over because it is ignored has not failed, and counting it as one would turn every repository holding a `.qinignore` into a failing `qin add .`.
 
+### add File Lists (@file)
+
+`runAdd` expands every positional argument and every `--exclude` value that starts with `@`
+through one helper, `expandAtFiles`, **before** any walk. `@file` names a file whose
+non-blank, non-`#` lines replace the item. A missing or unreadable list is a hard error —
+there is no literal-path fallback; stage a file actually named `@name` as `./@name`. Only
+command-line items are expanded: a line starting with `@` inside a list is a literal name,
+not another list.
+
+**Both the list path and its entries are CWD-relative**, like every other path argument.
+The list file may live anywhere, including outside the repository, but a positional entry
+must resolve inside it. Entries are handed to the walkers verbatim — no join onto `r.Path`,
+and no second containment check — so `addFileToIndex`'s
+`filepath.Abs → filepath.Rel → isOutsideRepo` remains the one place that refuses an escape.
+An absolute list path must be recognized with `filepath.IsAbs` and read as-is; resolving it
+with `filepath.Join(baseDir, name)` would be wrong, because Go's `Join` keeps the base
+(`Join("/repo", "/tmp/x")` is `/repo/tmp/x`).
+
+This deliberately changes `--exclude @file`: it used to resolve against the repository root
+and now follows CWD. Running at the root is unchanged; running from a subdirectory is not.
+
 ### Large File Pipeline
 
 Files added via `add` go through `StoreChunkedFile()`:

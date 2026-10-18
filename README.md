@@ -74,7 +74,7 @@ qin clone http://example.com/repo myrepo
 | 命令 | 说明 |
 |------|------|
 | `init [--bare] [<path>]` | 初始化新仓库（默认当前目录）；`--bare` 标记为推送目标（无工作树，任何分支都不受保护） |
-| `add <file> [--os \| --os-match <expr>] [--exclude <glob> \| --exclude @file]` | 暂存文件（`--os` 标记为当前 OS 变体；`--os-match` 指定 OS 表达式；`--exclude` 排除匹配文件，`@file` 从文件读取排除模式） |
+| `add <file\|@file> [--os \| --os-match <expr>] [--exclude <glob> \| --exclude @file]` | 暂存文件（`--os` 标记为当前 OS 变体；`--os-match` 指定 OS 表达式；`@file` 从文件读取待暂存路径，每行一个，空行和 `#` 注释行忽略；`--exclude` 排除匹配文件，`--exclude @file` 从文件读取排除模式） |
 | `rm <file>` | 移除已暂存文件 |
 | `commit -m <msg>` | 从暂存区创建提交 |
 | `status` | 查看工作区状态 |
@@ -175,8 +175,20 @@ qin add --os-match "!mac" config.ini
 # 排除匹配 glob 的文件
 qin add --exclude "*.log" --exclude "build/" .
 
-# 从文件读取排除模式
+# 从文件读取要暂存的文件名（每行一个；空行和 # 注释行忽略）
+qin add @files.txt
+
+# @file 相对当前工作目录解析，可带目录，也可位于仓库外
+qin add @../lists/extra.txt
+qin add @/tmp/lists/extra.txt
+
+# 列表中的条目同样相对当前工作目录，但必须位于仓库内；
+# 越界条目按 path outside repository 拒绝
+qin add @../lists/tracked.txt
+
+# 从文件读取排除模式（列表文件同样可位于仓库外）
 qin add --exclude @.gitignore .
+qin add --exclude @/tmp/lists/ignore.txt .
 
 # 查看文件的所有变体
 qin show config.ini
@@ -185,6 +197,8 @@ qin show config.ini
 qin show config.ini --os win
 qin show config.ini --os linux
 ```
+
+`@file` 读不到会直接报错，不回退为字面路径。`@` 后的文件路径以当前工作目录为基准解析（此前 `--exclude @file` 相对仓库根），从子目录运行时请注意。要暂存名字本身以 `@` 开头的文件，可写 `./@name`；列表文件内部的 `@name` 按字面文件名处理，不会再次展开。
 
 ## 技术细节
 
