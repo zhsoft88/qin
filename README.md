@@ -74,7 +74,7 @@ qin clone http://example.com/repo myrepo
 | 命令 | 说明 |
 |------|------|
 | `init [--bare] [<path>]` | 初始化新仓库（默认当前目录）；`--bare` 标记为推送目标（无工作树，任何分支都不受保护） |
-| `add <file\|@file> [--os \| --os-match <expr>] [--exclude <glob> \| --exclude @file]` | 暂存文件（`--os` 标记为当前 OS 变体；`--os-match` 指定 OS 表达式；`@file` 从文件读取待暂存路径，每行一个，空行和 `#` 注释行忽略；`--exclude` 排除匹配文件，`--exclude @file` 从文件读取排除模式） |
+| `add <file\|@file> [--os \| --os-match <expr>] [--exclude <glob> \| --exclude @file]` | 暂存文件（`--os` 标记为当前 OS 变体；`--os-match` 指定 OS 表达式；`@file` 从文件读取待暂存路径，每行一个，空行和 `#` 注释行忽略，条目支持 shell 通配符；`--exclude` 排除匹配文件，`--exclude @file` 从文件读取排除模式） |
 | `rm <file>` | 移除已暂存文件 |
 | `commit -m <msg>` | 从暂存区创建提交 |
 | `status` | 查看工作区状态 |
@@ -186,6 +186,13 @@ qin add @/tmp/lists/extra.txt
 # 越界条目按 path outside repository 拒绝
 qin add @../lists/tracked.txt
 
+# 列表条目支持 shell 通配符：
+#   src/*.go         -> src 下一层的 .go
+#   **/*.go          -> 递归所有 .go（不进入隐藏目录）
+#   cmd/*/main.go    -> 中间目录通配
+#   src/*/           -> 只匹配目录
+qin add @globs.txt
+
 # 从文件读取排除模式（列表文件同样可位于仓库外）
 qin add --exclude @.gitignore .
 qin add --exclude @/tmp/lists/ignore.txt .
@@ -199,6 +206,8 @@ qin show config.ini --os linux
 ```
 
 `@file` 读不到会直接报错，不回退为字面路径。`@` 后的文件路径以当前工作目录为基准解析（此前 `--exclude @file` 相对仓库根），从子目录运行时请注意。要暂存名字本身以 `@` 开头的文件，可写 `./@name`；列表文件内部的 `@name` 按字面文件名处理，不会再次展开。
+
+列表文件中的条目按 shell pathname expansion 语义展开：从路径开头锚定，`*`/`?`/`[]` 不跨 `/`，整段 `**` 匹配零个或多个路径段，区分大小写；通配符默认不匹配以 `.` 开头的名字（`**` 也不进入隐藏目录），需要时显式写 `.hidden`。`\` 转义下一个字符（Windows 上 `\` 是路径分隔符，因此不能用来转义通配符）。模式在文件系统中没有任何匹配时保留字面，由 `add` 报 no such file 并以非零退出。只有 `@file` 读出的位置参数会展开——命令行参数已由 shell 处理，`--exclude` 文件中的模式也不会展开。`--exclude` 的匹配是非锚定、也匹配 basename 的 gitignore 语义，与列表内通配**不同**。绝对模式（如 `/**`）可能遍历很大的树，请谨慎使用。
 
 ## 技术细节
 

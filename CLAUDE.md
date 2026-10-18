@@ -81,12 +81,43 @@ not another list.
 
 **Both the list path and its entries are CWD-relative**, like every other path argument.
 The list file may live anywhere, including outside the repository, but a positional entry
-must resolve inside it. Entries are handed to the walkers verbatim — no join onto `r.Path`,
-and no second containment check — so `addFileToIndex`'s
+must resolve inside it. No join onto `r.Path` and no second containment check happens in
+the expander, so `addFileToIndex`'s
 `filepath.Abs → filepath.Rel → isOutsideRepo` remains the one place that refuses an escape.
 An absolute list path must be recognized with `filepath.IsAbs` and read as-is; resolving it
 with `filepath.Join(baseDir, name)` would be wrong, because Go's `Join` keeps the base
 (`Join("/repo", "/tmp/x")` is `/repo/tmp/x`).
+
+**List entries are shell-expanded; command-line arguments and `--exclude` lines are not.**
+`expandAtFiles` takes `expandEntries`, true only for positional arguments: a command-line
+argument has already been through the shell, and an exclude line is a pattern for the
+matcher, so expanding it would replace the pattern with what it currently matches. Each
+positional list line goes through `cmd/qin/glob.go`'s `expandListEntry`; a line with no
+wildcard and no escape is returned untouched, so ordinary paths keep their exact spelling.
+
+The expansion is shell pathname expansion, anchored at the start of the path: `*`, `?` and
+`[]` stay inside one segment, a whole `**` segment matches zero or more segments, matching
+is case-sensitive, and a wildcard never matches a leading dot (`**` does not consume hidden
+segments either). `internal/repo/pathglob.go`'s `MatchPathGlob` is the matcher. It reuses
+`globMatch` per segment but is **not** `MatchGlob`: that one is gitignore-style,
+non-anchored, also tries the basename, and lets wildcards match dotfiles. The two answer
+different questions and must not be interchanged. `globMatch` has no `[!...]`/`[^...]`
+negation, so `[!a]` is a class containing `!` and `a` rather than a negation.
+
+An unmatched pattern is kept literally (bash's default), minus escape backslashes, so the
+add walker reports no-such-file and `runAdd` exits non-zero. It is never silently dropped:
+staging part of what was asked and claiming success is the failure shape this repository
+keeps fixing.
+
+The walk starts at the pattern's literal segment prefix. It uses `filepath.Walk`, hence
+`Lstat` and no symlink traversal, matching the add walkers' invariant; it prunes the
+repository's root `.qin` through `IsRepoMetadataPath` (a nested `.qin` is ordinary
+content), and, when the pattern has no `**`, stops descending once a directory has reached
+the pattern's depth. Walk errors are ignored: an unreadable directory is no match, not a
+new failure. On Windows `\` normalizes to `/` before matching, so wildcards cannot be
+escaped there; on Unix `\/` is the separator it spells. Expansion results are deduplicated
+by resolved path across the lists, then enter the same walkers, `.qinignore` handling and
+containment check as literal arguments.
 
 This deliberately changes `--exclude @file`: it used to resolve against the repository root
 and now follows CWD. Running at the root is unchanged; running from a subdirectory is not.

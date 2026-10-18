@@ -233,11 +233,11 @@ func runAdd(args []string) error {
 	if err != nil {
 		return err
 	}
-	excludeFlags, err = expandAtFiles(excludeFlags, cwd)
+	excludeFlags, err = expandAtFiles(excludeFlags, cwd, r.Path, false)
 	if err != nil {
 		return err
 	}
-	args, err = expandAtFiles(fs.Args(), cwd)
+	args, err = expandAtFiles(fs.Args(), cwd, r.Path, true)
 	if err != nil {
 		return err
 	}
@@ -582,12 +582,19 @@ func relPath(r *repo.Repository, path string) string {
 // base, so Join("/repo", "/tmp/list") is "/repo/tmp/list", not "/tmp/list".
 // The file may therefore live anywhere, including outside the repository.
 //
-// Lines are returned verbatim apart from trimming: the add walkers resolve
-// them against the CWD exactly like literal arguments, and addFileToIndex is
-// what rejects an entry that escapes the repository. Only the command line is
-// expanded — a line starting with @ is a literal name, not another list.
-func expandAtFiles(items []string, baseDir string) ([]string, error) {
+// Lines are resolved by the add walkers against the CWD exactly like literal
+// arguments, and addFileToIndex is what rejects an entry that escapes the
+// repository. Only the command line is expanded — a line starting with @ is a
+// literal name, not another list.
+//
+// When expandEntries is true (the positional arguments), each line is first put
+// through shell pathname expansion. The --exclude branch passes false: its
+// lines are patterns for the matcher, not paths to look for, and expanding
+// them would replace a pattern with the files it currently matches. Entries are
+// deduplicated by resolved path across the lists, keeping the first occurrence.
+func expandAtFiles(items []string, baseDir, repoRoot string, expandEntries bool) ([]string, error) {
 	var out []string
+	seen := make(map[string]bool)
 	for _, p := range items {
 		if !strings.HasPrefix(p, "@") {
 			out = append(out, p)
@@ -603,8 +610,27 @@ func expandAtFiles(items []string, baseDir string) ([]string, error) {
 		}
 		for _, line := range strings.Split(string(data), "\n") {
 			line = strings.TrimSpace(line)
-			if line != "" && !strings.HasPrefix(line, "#") {
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if !expandEntries {
 				out = append(out, line)
+				continue
+			}
+			for _, entry := range expandListEntry(line, baseDir, repoRoot) {
+				key := entry
+				if !filepath.IsAbs(key) {
+					key = filepath.Join(baseDir, key)
+				}
+				if abs, err := filepath.Abs(key); err == nil {
+					key = abs
+				}
+				key = filepath.Clean(key)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				out = append(out, entry)
 			}
 		}
 	}

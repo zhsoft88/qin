@@ -469,7 +469,7 @@ func TestExpandAtFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := expandAtFiles([]string{"plain", "@" + absList}, base)
+	got, err := expandAtFiles([]string{"plain", "@" + absList}, base, base, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +486,7 @@ func TestExpandAtFiles(t *testing.T) {
 	if err := ioutil.WriteFile(filepath.Join(base, "lists", "rel.txt"), []byte("x\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	got, err = expandAtFiles([]string{"@lists/rel.txt"}, base)
+	got, err = expandAtFiles([]string{"@lists/rel.txt"}, base, base, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestExpandAtFiles(t *testing.T) {
 	}
 
 	// A missing list is a hard error with no literal fallback.
-	if _, err := expandAtFiles([]string{"@nope.txt"}, base); err == nil {
+	if _, err := expandAtFiles([]string{"@nope.txt"}, base, base, true); err == nil {
 		t.Fatal("a missing @file must be an error")
 	} else if !strings.Contains(err.Error(), "read @file") {
 		t.Fatalf("error = %v, want it to name the @file", err)
@@ -613,5 +613,100 @@ func TestRunAddAtFileEscapingEntryRejected(t *testing.T) {
 	err = addFileOrDir(r, "../outside.txt", nil, &added, idx, ignorer)
 	if err == nil || !strings.Contains(err.Error(), "path outside repository") {
 		t.Fatalf("addFileOrDir error = %v, want path outside repository", err)
+	}
+}
+
+// TestRunAddGlobsFromList drives the real command with wildcard lines: the
+// expansion feeds the existing walkers, so what lands in the index is what an
+// equivalent literal argument would have staged.
+func TestRunAddGlobsFromList(t *testing.T) {
+	r, repoDir, parent := newRepoWithParent(t)
+	for _, rel := range []string{"src/a.go", "src/sub/b.go", "top.go", ".hidden.go"} {
+		writeAt(t, repoDir, rel, rel)
+	}
+	list := filepath.Join(parent, "globs.txt")
+	if err := ioutil.WriteFile(list, []byte("src/*.go\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, repoDir)
+	at := "@" + filepath.Join("..", "globs.txt")
+
+	if err := runAdd([]string{at}); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"src/a.go"}) {
+		t.Fatalf("indexed %v, want only src/a.go", got)
+	}
+
+	// "**" is recursive and still refuses dot names.
+	if err := ioutil.WriteFile(list, []byte("**/*.go\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAdd([]string{at}); err != nil {
+		t.Fatal(err)
+	}
+	idx, err = r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"src/a.go", "src/sub/b.go", "top.go"}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, want) {
+		t.Fatalf("indexed %v, want %v", got, want)
+	}
+}
+
+// TestRunAddGlobNoMatchFails: an unmatched pattern is kept literally, so the
+// add walker's no-such-file error reaches the exit status instead of the
+// pattern vanishing.
+func TestRunAddGlobNoMatchFails(t *testing.T) {
+	r, repoDir := newAddRepo(t)
+	writeAt(t, repoDir, "a.txt", "a")
+	list := filepath.Join(t.TempDir(), "bad.txt")
+	if err := ioutil.WriteFile(list, []byte("nomatch/*.go\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, repoDir)
+
+	if err := runAdd([]string{"@" + list}); err == nil {
+		t.Fatal("an unmatched pattern must fail the add")
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := indexedPaths(idx); len(got) != 0 {
+		t.Fatalf("indexed %v, want nothing", got)
+	}
+}
+
+// TestRunAddGlobDoesNotFollowSymlink: the shell would descend through a
+// symlinked directory; qin's walkers never do, and expansion must not quietly
+// reintroduce what they refuse.
+func TestRunAddGlobDoesNotFollowSymlink(t *testing.T) {
+	r, repoDir, parent := newRepoWithParent(t)
+	writeAt(t, repoDir, "real.txt", "real")
+	writeAt(t, parent, "outside/x.txt", "x")
+	if err := os.Symlink(filepath.Join(parent, "outside"), filepath.Join(repoDir, "link")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	list := filepath.Join(parent, "globs.txt")
+	if err := ioutil.WriteFile(list, []byte("**/*.txt\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, repoDir)
+
+	if err := runAdd([]string{"@" + filepath.Join("..", "globs.txt")}); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"real.txt"}) {
+		t.Fatalf("indexed %v, want only real.txt (link must not be followed)", got)
 	}
 }
