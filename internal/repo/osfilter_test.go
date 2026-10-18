@@ -470,10 +470,11 @@ func TestAddFileWithOS(t *testing.T) {
 	}
 }
 
-// TestAddOSVariantDropsDefault pins the exclusivity rule: a default variant
-// means "every OS", so tagging a path for one OS must remove it — otherwise
-// the path still materializes on exactly the platforms the tag excludes.
-func TestAddOSVariantDropsDefault(t *testing.T) {
+// TestAddOSVariantSplitsDefault pins the rule: a default variant means "every
+// OS", so tagging a path for one OS replaces it with explicit variants for the
+// other known OSes, each carrying the content the default held. The wildcard
+// is gone, but no platform loses what it saw.
+func TestAddOSVariantSplitsDefault(t *testing.T) {
 	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
 		t.Fatal(err)
@@ -497,20 +498,41 @@ func TestAddOSVariantDropsDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The linux tag displaces the default, so the path is invisible to every
-	// other platform rather than merely shadowed on linux.
+	// The wildcard is gone: leaving mask 0 would shadow the linux variant here
+	// and apply the default's content to every other platform as well.
 	idx, err := r.LoadIndex()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := idx.Entries["config.yaml"]; ok {
-		t.Error("an --os add must drop the default variant")
+		t.Error("an --os add must remove the default variant")
 	}
-	if _, ok := idx.Entries["config.yaml\x00\x04"]; !ok {
-		t.Error("expected linux config.yaml in index")
+	linux, ok := idx.Entries["config.yaml\x00\x04"]
+	if !ok {
+		t.Fatal("expected linux config.yaml in index")
 	}
-	if _, ok := visibleEntries(idx.Entries, OSWin)["config.yaml"]; ok {
-		t.Error("linux-tagged path is still visible on windows")
+	if linux.ContentHash != core.HashFromBytes([]byte("linux config")) {
+		t.Error("linux variant does not hold the content just added")
+	}
+	// The other known OSes keep exactly what the default held.
+	for _, oss := range []uint8{OSWin, OSMac} {
+		e, ok := idx.Entries[entryKey("config.yaml", oss)]
+		if !ok {
+			t.Errorf("expected a variant for mask %d in index", oss)
+			continue
+		}
+		if e.OSS != oss {
+			t.Errorf("variant mask = %d, want %d", e.OSS, oss)
+		}
+		if e.ContentHash != core.HashFromBytes([]byte("default config")) {
+			t.Errorf("variant %d does not hold the default's content", oss)
+		}
+		if v, ok := visibleEntries(idx.Entries, oss)["config.yaml"]; !ok || v.OSS != oss {
+			t.Errorf("variant %d is not the one visible on that OS", oss)
+		}
+	}
+	if _, ok := visibleEntries(idx.Entries, OSLinux)["config.yaml"]; !ok {
+		t.Error("linux lost the path after the split")
 	}
 
 	// An explicit default is the one way to ask for coexistence; it is what
@@ -530,7 +552,7 @@ func TestAddOSVariantDropsDefault(t *testing.T) {
 	}
 
 	// A plain add follows the visible variant without disturbing the explicit
-	// default: exclusivity is a property of the tag, not of every add.
+	// default: splitting is a property of the tag, not of every add.
 	ioutil.WriteFile(filepath.Join(dir, "config.yaml"), []byte("newer linux config"), 0644)
 	if err := r.AddFile(filepath.Join(dir, "config.yaml")); err != nil {
 		t.Fatal(err)
@@ -602,13 +624,94 @@ func TestAddOSVariantDropsDefault(t *testing.T) {
 	}
 }
 
+// TestSplitDefaultKeepsExistingVariant: the split fills in only the OSes that
+// have no entry. An explicitly staged variant may hold content of its own and
+// must not be overwritten with the default's.
+func TestSplitDefaultKeepsExistingVariant(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repoDir, "f.txt")
+
+	if err := ioutil.WriteFile(path, []byte("default content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddFileToIndex(path, 0, idx); err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(path, []byte("mac content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddFileToIndex(path, OSMac, idx); err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(path, []byte("linux content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddFileToIndex(path, OSLinux, idx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := idx.Entries[entryKey("f.txt", 0)]; ok {
+		t.Error("the split left the default variant behind")
+	}
+	if e, ok := idx.Entries[entryKey("f.txt", OSMac)]; !ok {
+		t.Error("the existing mac variant disappeared")
+	} else if e.ContentHash != core.HashFromBytes([]byte("mac content")) {
+		t.Error("the split overwrote the existing mac variant")
+	}
+	if e, ok := idx.Entries[entryKey("f.txt", OSWin)]; !ok {
+		t.Error("expected a new win variant")
+	} else if e.ContentHash != core.HashFromBytes([]byte("default content")) {
+		t.Error("the new win variant does not hold the default's content")
+	}
+}
+
+// TestSplitDefaultRespectsCombinedMask: the tag may cover more than one OS;
+// only the OSes outside it get a copy of the default.
+func TestSplitDefaultRespectsCombinedMask(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repoDir, "f.txt")
+	if err := ioutil.WriteFile(path, []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.AddFileToIndex(path, 0, idx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.AddFileToIndex(path, OSWin|OSLinux, idx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := idx.Entries[entryKey("f.txt", 0)]; ok {
+		t.Error("the split left the default variant behind")
+	}
+	if _, ok := idx.Entries[entryKey("f.txt", OSWin|OSLinux)]; !ok {
+		t.Error("expected the combined win|linux variant")
+	}
+	if _, ok := idx.Entries[entryKey("f.txt", OSMac)]; !ok {
+		t.Error("expected the OS outside the tag to keep the default's content")
+	}
+	for _, oss := range []uint8{OSWin, OSLinux} {
+		if _, ok := idx.Entries[entryKey("f.txt", oss)]; ok {
+			t.Errorf("a single-OS variant for mask %d was created unnecessarily", oss)
+		}
+	}
+}
+
 // TestPlainAddFollowsVisibleVariant pins the other half of the rule: once a
 // path carries the running host's variant, a plain add updates that variant
 // rather than creating a default beside it. The default would be shadowed here
 // (the add would look like it did nothing, status would keep saying modified)
 // and visible on every other platform.
 func TestPlainAddFollowsVisibleVariant(t *testing.T) {
-	dir, err := ioutil.TempDir("", "lo-test-os-*")
+	dir, err := ioutil.TempDir("", "qin-test-os-*")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -667,8 +770,9 @@ func TestRemoveFileWithOS(t *testing.T) {
 	}
 
 	ioutil.WriteFile(filepath.Join(dir, "f.txt"), []byte("data"), 0644)
-	// An --os add drops the default, so stage the pair explicitly: the linux
-	// variant first, then an explicit default (what --os-match '*' does).
+	// Stage the pair explicitly: the linux variant first, then an explicit
+	// default (what --os-match '*' stages). There is no default yet, so no
+	// split is involved.
 	r.AddFileOS(filepath.Join(dir, "f.txt"), "linux")
 	r.AddFileOS(filepath.Join(dir, "f.txt"), "")
 

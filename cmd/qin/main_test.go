@@ -346,18 +346,18 @@ func TestAddSkipsIgnoredName(t *testing.T) {
 	}
 }
 
-// TestAddOSExprDropsDefaultVariant is the rule that makes an --os directory
-// actually OS-only: a default entry means "every OS", so staging the same path
-// for one OS must remove it. Otherwise a linux-only tree still materializes on
-// Windows, which is exactly the .cipd clone failure.
-func TestAddOSExprDropsDefaultVariant(t *testing.T) {
+// TestAddOSExprSplitsDefaultVariant: a default entry means "every OS", so an
+// --os add on the same path removes it and gives every other known OS an
+// explicit variant holding the content the default held. The tagged OS gets
+// the content on disk; nobody loses what they saw before.
+func TestAddOSExprSplitsDefaultVariant(t *testing.T) {
 	r, dir := newAddRepo(t)
 	host := repo.CurrentOSID()
 	if host == 0 {
 		t.Skip("unknown host OS")
 	}
 
-	writeAt(t, dir, "pkg/thing.txt", "payload")
+	writeAt(t, dir, "pkg/thing.txt", "old")
 	idx := indexAfterAdd(t, r, "pkg")
 	if got := masksAt(idx, "pkg/thing.txt"); !reflect.DeepEqual(got, []uint8{0}) {
 		t.Fatalf("plain add masks = %v, want the default", got)
@@ -366,9 +366,27 @@ func TestAddOSExprDropsDefaultVariant(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	writeAt(t, dir, "pkg/thing.txt", "new")
 	idx = indexAfterAddOSExpr(t, r, "pkg")
-	if got := masksAt(idx, "pkg/thing.txt"); !reflect.DeepEqual(got, []uint8{host}) {
-		t.Fatalf("--os add masks = %v, want only the host's %d", got, host)
+	want := []uint8{repo.OSWin, repo.OSMac, repo.OSLinux}
+	if got := masksAt(idx, "pkg/thing.txt"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("--os add masks = %v, want %v", got, want)
+	}
+	oldHash := core.HashFromBytes([]byte("old"))
+	newHash := core.HashFromBytes([]byte("new"))
+	for _, mask := range want {
+		e, ok := idx.Entries[repo.EntryKey("pkg/thing.txt", mask)]
+		if !ok {
+			t.Errorf("missing variant for mask %d", mask)
+			continue
+		}
+		wantHash := oldHash
+		if mask == host {
+			wantHash = newHash
+		}
+		if e.ContentHash != wantHash {
+			t.Errorf("variant %d holds the wrong content", mask)
+		}
 	}
 }
 

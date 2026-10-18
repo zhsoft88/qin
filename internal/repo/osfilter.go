@@ -22,6 +22,15 @@ var KnownOSes = []string{
 	"linux",
 }
 
+// allOSMask has one bit set for every entry in KnownOSes.
+var allOSMask = func() uint8 {
+	var m uint8
+	for i := range KnownOSes {
+		m |= 1 << uint(i)
+	}
+	return m
+}()
+
 // osNameToID maps OS name strings to their bitmask values.
 var osNameToID map[string]uint8
 

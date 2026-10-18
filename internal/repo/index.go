@@ -281,8 +281,9 @@ func (r *Repository) AddFile(filePath string) error {
 // AddFileOS reads a file from disk, stores it as an object, and adds it to the
 // index as an OS-specific entry. The os parameter must be a known OS identifier;
 // an empty one means the default (all-OS) variant. Tagging a path for an OS
-// removes its default variant: the default would materialize the path on the
-// platforms the mask was meant to hide.
+// replaces its default variant with explicit variants for the other known
+// OSes (see splitDefaultVariant): a mask-0 entry applies to every platform and
+// would shadow the tagged variant here while remaining visible elsewhere.
 func (r *Repository) AddFileOS(filePath, osTag string) error {
 	id := OSID(osTag)
 	if osTag != "" && id == 0 {
@@ -378,21 +379,40 @@ func visibleMask(idx *Index, name string) uint8 {
 	return 0
 }
 
-// dropDefaultVariant removes the default entry for name when an OS-specific
-// variant is being written. Mask 0 means "every OS", so leaving it behind
-// would materialize the path on exactly the platforms the mask excludes — the
-// Windows checkout of a linux-tagged path, which is the whole reason the mask
-// exists. An explicit default can still be staged with --os-match '*'.
-// Returns whether the index changed.
-func dropDefaultVariant(idx *Index, name string, oss uint8) bool {
+// splitDefaultVariant replaces a path's default (all-OS) entry when an
+// OS-specific variant is being written. Mask 0 matches every OS: left in place
+// it would shadow the variant being written on this host and keep the path
+// visible on platforms whose content nobody staged. The default's content is
+// not discarded — each other known OS gets an explicit variant holding it, so
+// no platform loses what it saw — but from here on every known OS has its own
+// entry and can be changed independently.
+//
+// A variant that already exists is never overwritten: it was staged explicitly
+// and may hold content of its own. Returns whether the index changed.
+func splitDefaultVariant(idx *Index, name string, oss uint8) bool {
 	if oss == 0 {
 		return false
 	}
-	key := entryKey(name, 0)
-	if _, ok := idx.Entries[key]; !ok {
+	defKey := entryKey(name, 0)
+	def, ok := idx.Entries[defKey]
+	if !ok {
 		return false
 	}
-	delete(idx.Entries, key)
+	delete(idx.Entries, defKey)
+
+	other := allOSMask &^ oss
+	for bit := uint8(1); bit&allOSMask != 0; bit <<= 1 {
+		if other&bit == 0 {
+			continue
+		}
+		key := entryKey(name, bit)
+		if _, exists := idx.Entries[key]; exists {
+			continue
+		}
+		variant := def
+		variant.OSS = bit
+		idx.Entries[key] = variant
+	}
 	return true
 }
 
@@ -461,12 +481,12 @@ func (r *Repository) addFileToIndex(filePath string, oss uint8, auto bool, idx *
 			return false, fmt.Errorf("cannot add non-empty directory: %s", filePath)
 		}
 		key := entryKey(relFormatted, oss)
-		// Only an explicit --os tag is exclusive. A plain add follows the
+		// Only an explicit --os tag splits the default. A plain add follows the
 		// variant this host reads and leaves an explicitly staged default
 		// (--os-match '*') alone.
-		dropped := !auto && dropDefaultVariant(idx, relFormatted, oss)
+		split := !auto && splitDefaultVariant(idx, relFormatted, oss)
 		if e, ok := idx.Entries[key]; ok && e.Mode == DirMode {
-			return dropped, nil // entry unchanged; dropping the default still counts
+			return split, nil // entry unchanged; splitting the default still counts
 		}
 		idx.Entries[key] = IndexEntry{
 			Mode:  DirMode,
@@ -510,11 +530,11 @@ func (r *Repository) addFileToIndex(filePath string, oss uint8, auto bool, idx *
 	mode := uint32(fi.Mode())
 
 	key := entryKey(filepath.ToSlash(relPath), oss)
-	// As in the directory branch: exclusivity belongs to the explicit tag, not
+	// As in the directory branch: splitting belongs to the explicit tag, not
 	// to a plain add following the visible variant.
-	dropped := !auto && dropDefaultVariant(idx, relFormatted, oss)
+	split := !auto && splitDefaultVariant(idx, relFormatted, oss)
 	if e, ok := idx.Entries[key]; ok && e.Hash == h && e.Mode == mode {
-		return dropped, nil // entry unchanged; dropping the default still counts
+		return split, nil // entry unchanged; splitting the default still counts
 	}
 	idx.Entries[key] = IndexEntry{
 		Hash:        h,
