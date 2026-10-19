@@ -1107,3 +1107,53 @@ func TestStatusRefusesUnreadableHEADSide(t *testing.T) {
 		t.Errorf("the error does not name the entry that caused it: %v", err)
 	}
 }
+
+// TestStatusDegradedSymlinkAndTypeChange covers both on-disk shapes of a
+// stored link entry: a real link is read back (see
+// TestStatusSymlinkComparedByTarget), and the degraded regular file of
+// core.symlinks=false is compared by its bytes — the target text. When real
+// links are enabled and the worktree holds a regular file instead, the type
+// changed and must be reported, not silently accepted.
+func TestStatusDegradedSymlinkAndTypeChange(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	stageStoredLink(t, r, "a", "../real")
+	full := filepath.Join(repoDir, "a")
+
+	write := func(content string) {
+		t.Helper()
+		if err := ioutil.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	modifiedA := func() bool {
+		t.Helper()
+		st, err := r.WorkTreeStatus()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range st.Modified {
+			if p == "a" {
+				return true
+			}
+		}
+		return false
+	}
+
+	off := false
+	r.Config.Core.Symlinks = &off
+	write("../real")
+	if modifiedA() {
+		t.Error("degraded file with the recorded target reported modified")
+	}
+	write("../other")
+	if !modifiedA() {
+		t.Error("degraded file with a different target not reported modified")
+	}
+
+	on := true
+	r.Config.Core.Symlinks = &on
+	write("../real")
+	if !modifiedA() {
+		t.Error("a regular file where a real link is expected not reported as a type change")
+	}
+}

@@ -25,6 +25,12 @@ type Config struct {
 		// a non-bare repository byte-identical to what it was before the field
 		// existed.
 		Bare bool `json:"bare,omitempty"`
+		// Symlinks controls whether a stored symlink is materialized as a real
+		// link. nil means the platform default: git-compatible, false on
+		// Windows and true elsewhere. A pointer is required because a plain
+		// bool with omitempty could not distinguish "unset" (use the platform
+		// default) from an explicit false.
+		Symlinks *bool `json:"symlinks,omitempty"`
 	} `json:"core"`
 	Diff struct {
 		MaxSize  int `json:"max_size"`  // skip content diff if file exceeds this (bytes)
@@ -45,6 +51,23 @@ func DefaultConfig() *Config {
 	c.Diff.MaxSize = 512 * 1024 // 512KB
 	c.Diff.MaxLines = 2000      // lines
 	return c
+}
+
+// symlinksDefault is the platform default for core.symlinks: git treats
+// Windows as unable to create symlinks for an ordinary user, so a stored link
+// is checked out there as a regular file holding the target text. hostGOOS is
+// the testable platform hook; a real Windows host reports "windows".
+func symlinksDefault() bool {
+	return hostGOOS() != "windows"
+}
+
+// symlinksEnabled reports whether this repository materializes stored symlinks
+// as real links. An unset key follows the platform default.
+func (r *Repository) symlinksEnabled() bool {
+	if r == nil || r.Config == nil || r.Config.Core.Symlinks == nil {
+		return symlinksDefault()
+	}
+	return *r.Config.Core.Symlinks
 }
 
 func LoadConfig(repoPath string) (*Config, error) {
@@ -83,6 +106,7 @@ var configKeys = map[string]string{
 	"core.chunk_max_size":  "Maximum chunk size in bytes (default 8388608)",
 	"core.fsmonitor":       "Skip unchanged files in status using the built-in change monitor: false | true",
 	"core.bare":            "No working tree: a push target, which protects no branch from being pushed to: false | true",
+	"core.symlinks":        "Check out symlinks as real links; false writes the target as a regular file (default: true except on windows): false | true",
 	"diff.max_size":        "Skip content diff if file exceeds this in bytes (default 524288)",
 	"diff.max_lines":       "Skip line diff if file exceeds this many lines (default 2000)",
 	"user.name":            "User name for commit author",
@@ -105,6 +129,11 @@ func ConfigGet(cfg *Config, key string) (string, error) {
 		return cfg.Core.Fsmonitor, nil
 	case "core.bare":
 		return strconv.FormatBool(cfg.Core.Bare), nil
+	case "core.symlinks":
+		if cfg.Core.Symlinks == nil {
+			return strconv.FormatBool(symlinksDefault()), nil
+		}
+		return strconv.FormatBool(*cfg.Core.Symlinks), nil
 	case "diff.max_size":
 		return strconv.Itoa(cfg.Diff.MaxSize), nil
 	case "diff.max_lines":
@@ -153,6 +182,12 @@ func ConfigSet(cfg *Config, key, value string) error {
 			return fmt.Errorf("invalid core.bare value: %s (use false or true)", value)
 		}
 		cfg.Core.Bare = v
+	case "core.symlinks":
+		v, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("invalid core.symlinks value: %s (use false or true)", value)
+		}
+		cfg.Core.Symlinks = &v
 	case "diff.max_size":
 		v, err := strconv.Atoi(value)
 		if err != nil {
@@ -188,6 +223,8 @@ func ConfigUnset(cfg *Config, key string) error {
 		cfg.Core.Fsmonitor = FsmonitorOff
 	case "core.bare":
 		cfg.Core.Bare = false
+	case "core.symlinks":
+		cfg.Core.Symlinks = nil
 	case "diff.max_size":
 		cfg.Diff.MaxSize = 512 * 1024
 	case "diff.max_lines":

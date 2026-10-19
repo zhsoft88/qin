@@ -277,6 +277,12 @@ func TestCheckoutRestoresSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Explicitly opt in to real links: the platform default is false on
+	// Windows, where this test's os.Symlink setup already requires the
+	// privilege that makes a real link possible.
+	on := true
+	r.Config.Core.Symlinks = &on
+
 	// Wipe the worktree, so everything that comes back comes from the commit.
 	if err := os.RemoveAll(filepath.Join(dir, "pkg")); err != nil {
 		t.Fatal(err)
@@ -323,6 +329,124 @@ func TestCheckoutRestoresSymlink(t *testing.T) {
 	want := []string{"pkg/_current", "pkg/real/thing.txt"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("index after checkout = %v, want %v", got, want)
+	}
+}
+
+// TestCheckoutWritesDegradedSymlinkAsFile is the git core.symlinks=false
+// shape: the link entry materializes as a regular file holding the target
+// text, keeps its symlink mode in the index, and status compares that text so
+// the checkout is clean. Editing the file rewrites the target, and add keeps
+// the recorded type instead of turning it into a regular file.
+func TestCheckoutWritesDegradedSymlinkAsFile(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	off := false
+	r.Config.Core.Symlinks = &off
+
+	const target = "../real"
+	hostileCommit(t, r, []hostileEntry{
+		{name: "a", mode: SymlinkMode, content: target},
+		{name: "real", mode: 0644, content: "payload"},
+	})
+	if err := r.SwitchBranch("main"); err != nil {
+		t.Fatal(err)
+	}
+
+	full := filepath.Join(repoDir, "a")
+	fi, err := os.Lstat(full)
+	if err != nil {
+		t.Fatalf("a was not materialized: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("a was created as a real symlink, want a plain file")
+	}
+	if !fi.Mode().IsRegular() {
+		t.Fatalf("a mode = %v, want a regular file", fi.Mode())
+	}
+	data, err := ioutil.ReadFile(full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != target {
+		t.Fatalf("a contains %q, want the link target %q", data, target)
+	}
+
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := idx.Entries[entryKey("a", 0)]
+	if !ok || !IsSymlinkMode(entry.Mode) {
+		t.Fatalf("index lost the symlink type: %+v", entry)
+	}
+
+	st, err := r.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Modified) != 0 {
+		t.Fatalf("degraded checkout is not clean: modified = %v", st.Modified)
+	}
+
+	// Editing the plain file edits the recorded target.
+	if err := ioutil.WriteFile(full, []byte("../other"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	st, err = r.WorkTreeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range st.Modified {
+		if p == "a" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("changed target not reported: modified = %v", st.Modified)
+	}
+
+	if err := r.AddFile(full); err != nil {
+		t.Fatal(err)
+	}
+	idx, err = r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry = idx.Entries[entryKey("a", 0)]
+	if !IsSymlinkMode(entry.Mode) {
+		t.Fatalf("add turned the link into a regular file: mode = %v", entry.Mode)
+	}
+	content, err := r.LoadFileContent(entry.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "../other" {
+		t.Fatalf("stored target = %q, want %q", content, "../other")
+	}
+}
+
+// TestCheckoutDegradedSymlinkByPlatformDefault pins the Windows default
+// without needing a Windows host: an unset core.symlinks key must degrade.
+func TestCheckoutDegradedSymlinkByPlatformDefault(t *testing.T) {
+	old := hostGOOS
+	hostGOOS = func() string { return "windows" }
+	defer func() { hostGOOS = old }()
+
+	r, repoDir := newTempRepo(t)
+	if r.Config.Core.Symlinks != nil {
+		t.Fatalf("fresh config should leave core.symlinks unset, got %v", *r.Config.Core.Symlinks)
+	}
+	hostileCommit(t, r, []hostileEntry{{name: "a", mode: SymlinkMode, content: "real"}})
+	if err := r.SwitchBranch("main"); err != nil {
+		t.Fatal(err)
+	}
+
+	fi, err := os.Lstat(filepath.Join(repoDir, "a"))
+	if err != nil {
+		t.Fatalf("a was not materialized: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+		t.Fatalf("a mode = %v, want a regular file by the windows default", fi.Mode())
 	}
 }
 

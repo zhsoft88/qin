@@ -260,11 +260,27 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		// only because ReadFile fails on a directory.
 		var data []byte
 		if IsSymlinkMode(entry.Mode) {
-			target, err := os.Readlink(fullPath)
-			if err != nil {
+			switch {
+			case fi.Mode()&os.ModeSymlink != 0:
+				target, err := os.Readlink(fullPath)
+				if err != nil {
+					continue
+				}
+				data = []byte(linkTargetFromDisk(target))
+			case !r.symlinksEnabled() && fi.Mode().IsRegular():
+				// core.symlinks=false materializes the link as a regular file
+				// whose bytes are the target text. Read those bytes, not
+				// through the file: the recorded content is the target.
+				data, err = ioutil.ReadFile(fullPath)
+				if err != nil {
+					continue
+				}
+			default:
+				// The index records a link but the worktree holds neither a
+				// link nor the degraded file: a type change is a modification.
+				s.Modified = append(s.Modified, path)
 				continue
 			}
-			data = []byte(target)
 		} else {
 			data, err = ioutil.ReadFile(fullPath)
 			if err != nil {

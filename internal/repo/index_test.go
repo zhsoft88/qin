@@ -873,3 +873,187 @@ func TestAddFileToIndexAcceptsBackslashName(t *testing.T) {
 		t.Error("safeRepoPath refuses a name the add path just accepted")
 	}
 }
+
+// stageStoredLink records a path in the index as a symlink whose blob is the
+// target text — the state a degraded checkout (core.symlinks=false) leaves
+// behind. It returns the blob's hash.
+func stageStoredLink(t *testing.T, r *Repository, name, target string) core.Hash {
+	t.Helper()
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := r.StoreObject(core.ObjectBlob, []byte(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx.Entries[entryKey(name, 0)] = IndexEntry{
+		Hash:        h,
+		ContentHash: core.HashFromBytes([]byte(target)),
+		Size:        int64(len(target)),
+		Mode:        SymlinkMode,
+	}
+	if err := r.SaveIndex(idx); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// TestAddPreservesSymlinkModeWhenDisabled is git's rule that add never changes
+// a link into a regular file. On disk the degraded entry is an ordinary file,
+// so the index is the only place the type can come from; without the hint the
+// next commit would silently rewrite the tree entry as a plain file.
+func TestAddPreservesSymlinkModeWhenDisabled(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	off := false
+	r.Config.Core.Symlinks = &off
+
+	stageStoredLink(t, r, "a", "../old")
+	full := filepath.Join(repoDir, "a")
+	if err := ioutil.WriteFile(full, []byte("../new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.AddFile(full); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := idx.Entries[entryKey("a", 0)]
+	if !ok {
+		t.Fatal("add lost the entry")
+	}
+	if !IsSymlinkMode(entry.Mode) {
+		t.Fatalf("mode = %v, want the recorded symlink mode %v", entry.Mode, SymlinkMode)
+	}
+	content, err := r.LoadFileContent(entry.Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "../new" {
+		t.Fatalf("stored content = %q, want the new target %q", content, "../new")
+	}
+	// The same file with symlinks enabled is just a regular file; the hint must
+	// not apply then.
+	on := true
+	r.Config.Core.Symlinks = &on
+	if err := r.AddFile(full); err != nil {
+		t.Fatal(err)
+	}
+	idx, err = r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if IsSymlinkMode(idx.Entries[entryKey("a", 0)].Mode) {
+		t.Error("add kept the link type with core.symlinks enabled")
+	}
+}
+
+// TestAddPreservesSymlinkModeAcrossDefaultSplit covers the explicit --os form:
+// the type hint may only exist on the default entry, and splitDefaultVariant
+// removes that entry before the new variant is written. The hint must be read
+// first, and the split's copies for the other OSes must keep the link type.
+func TestAddPreservesSymlinkModeAcrossDefaultSplit(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	off := false
+	r.Config.Core.Symlinks = &off
+
+	defaultHash := stageStoredLink(t, r, "a", "../old")
+	full := filepath.Join(repoDir, "a")
+	if err := ioutil.WriteFile(full, []byte("../new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.AddFileOSMatch(full, "linux"); err != nil {
+		t.Fatal(err)
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	linux, ok := idx.Entries[entryKey("a", OSLinux)]
+	if !ok {
+		t.Fatalf("no linux variant; entries: %v", idx.Entries)
+	}
+	if !IsSymlinkMode(linux.Mode) {
+		t.Fatalf("linux mode = %v, want a symlink", linux.Mode)
+	}
+	if linux.Hash == defaultHash {
+		t.Error("linux variant kept the old target after the file changed")
+	}
+	if _, ok := idx.Entries[entryKey("a", 0)]; ok {
+		t.Error("the default variant survived the --os add")
+	}
+	for _, mask := range []uint8{OSWin, OSMac} {
+		e, ok := idx.Entries[entryKey("a", mask)]
+		if !ok {
+			t.Errorf("no variant for mask %d", mask)
+			continue
+		}
+		if !IsSymlinkMode(e.Mode) || e.Hash != defaultHash {
+			t.Errorf("mask %d variant = mode %v hash %s, want the default's link target %s",
+				mask, e.Mode, e.Hash.Short(), defaultHash.Short())
+		}
+	}
+}
+
+// TestWriteWorkTreeFileReplacesRegularFileWithSymlink is the EEXIST half of
+// the final-component rule: a link entry materialized as a real link must
+// replace an existing regular file, not fail because the name is taken.
+func TestWriteWorkTreeFileReplacesRegularFileWithSymlink(t *testing.T) {
+	r, repoDir := newTempRepo(t)
+	on := true
+	r.Config.Core.Symlinks = &on
+
+	if err := ioutil.WriteFile(filepath.Join(repoDir, "a"), []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(repoDir, "real"), []byte("payload"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.writeWorkTreeFile("a", []byte("real"), SymlinkMode); err != nil {
+		t.Fatalf("write over a regular file failed: %v", err)
+	}
+	fi, err := os.Lstat(filepath.Join(repoDir, "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("a mode = %v, want a symlink", fi.Mode())
+	}
+	target, err := os.Readlink(filepath.Join(repoDir, "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != "real" {
+		t.Fatalf("link target = %q, want %q", target, "real")
+	}
+}
+
+// TestLinkTargetFromDiskNormalizesWindowsSlashes pins the Windows half of the
+// read-back path without needing a Windows host. Go's os.Symlink converts '/'
+// to '\' on Windows, so the stored target and the read-back target differ by
+// separator alone; without normalization status reports the link modified on
+// every run. Only Readlink output is normalized: a degraded file's bytes are
+// the stored target verbatim.
+func TestLinkTargetFromDiskNormalizesWindowsSlashes(t *testing.T) {
+	old := hostGOOS
+	defer func() { hostGOOS = old }()
+
+	hostGOOS = func() string { return "windows" }
+	if got := linkTargetFromDisk(`..\real\file`); got != "../real/file" {
+		t.Errorf("windows: %q, want %q", got, "../real/file")
+	}
+	if got := linkTargetFromDisk("../real/file"); got != "../real/file" {
+		t.Errorf("windows slash form changed: %q", got)
+	}
+
+	hostGOOS = func() string { return "linux" }
+	if got := linkTargetFromDisk(`..\real`); got != `..\real` {
+		t.Errorf("linux: backslash is an ordinary byte and was changed: %q", got)
+	}
+}

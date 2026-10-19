@@ -20,6 +20,20 @@ func IsSymlinkMode(mode uint32) bool {
 	return mode&uint32(os.ModeSymlink) != 0
 }
 
+// linkTargetFromDisk normalizes a target read back with os.Readlink. On
+// Windows Go stores the link content with backslashes (os.Symlink converts
+// '/' to '\'), while the blob was stored with the portable '/'; without this
+// the same link would hash differently after every checkout and status would
+// report it modified forever. Only Readlink output is normalized — the bytes
+// of a degraded link file are the stored target verbatim, and a backslash may
+// be a legitimate byte there on Unix.
+func linkTargetFromDisk(target string) string {
+	if hostGOOS() == "windows" {
+		return strings.ReplaceAll(target, `\`, "/")
+	}
+	return target
+}
+
 // isOutsideRepo reports whether a path produced by filepath.Rel escapes the
 // repository root.
 //
@@ -69,10 +83,15 @@ func safeRepoPath(p string) bool {
 	return clean != "." && clean != ".." && !strings.HasPrefix(clean, "../")
 }
 
-// writeFileFromEntry writes file data to disk, creating a symlink or regular
-// file depending on the entry's mode.
-func writeFileFromEntry(path string, data []byte, mode uint32) error {
+// writeFileFromEntry writes file data to disk. A symlink mode creates a real
+// link when createLink is true; otherwise (core.symlinks=false, the Windows
+// default) the target text is written as an ordinary file, exactly as git
+// does. 0666 matches git's regular-file creation and is subject to the umask.
+func writeFileFromEntry(path string, data []byte, mode uint32, createLink bool) error {
 	if IsSymlinkMode(mode) {
+		if !createLink {
+			return ioutil.WriteFile(path, data, 0666)
+		}
 		return os.Symlink(string(data), path)
 	}
 	return ioutil.WriteFile(path, data, os.FileMode(mode))
@@ -150,16 +169,25 @@ func (r *Repository) writeWorkTreeFile(rel string, data []byte, mode uint32) (st
 	}
 	// The parent check cannot see the final component. A symlink there would
 	// be followed by the write, putting the content wherever it points — so
-	// drop it first and let the entry replace it outright, as git does.
-	if fi, err := os.Lstat(fullPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
-		if err := os.Remove(fullPath); err != nil {
-			// Refusing rather than writing anyway: the symlink is still there
-			// and the write would follow it.
-			return "", fmt.Errorf("%w: cannot replace symlink at %s: %v",
-				errOutsideWorkTree, rel, err)
+	// drop it first and let the entry replace it outright, as git does. A
+	// regular file where a real link is wanted must go too: os.Symlink would
+	// fail with EEXIST. Directories stay: a plain file never replaces one.
+	wantLink := IsSymlinkMode(mode) && r.symlinksEnabled()
+	if fi, err := os.Lstat(fullPath); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(fullPath); err != nil {
+				// Refusing rather than writing anyway: the symlink is still
+				// there and the write would follow it.
+				return "", fmt.Errorf("%w: cannot replace symlink at %s: %v",
+					errOutsideWorkTree, rel, err)
+			}
+		} else if wantLink && !fi.IsDir() {
+			if err := os.Remove(fullPath); err != nil {
+				return "", fmt.Errorf("replace %s: %w", rel, err)
+			}
 		}
 	}
-	if err := writeFileFromEntry(fullPath, data, mode); err != nil {
+	if err := writeFileFromEntry(fullPath, data, mode, wantLink); err != nil {
 		return "", fmt.Errorf("write %s: %w", rel, err)
 	}
 	return fullPath, nil
@@ -496,21 +524,37 @@ func (r *Repository) addFileToIndex(filePath string, oss uint8, auto bool, idx *
 		return true, nil
 	}
 
+	key := entryKey(relFormatted, oss)
+	// The index is the only record of a degraded symlink's type: on disk it is
+	// an ordinary file holding the target text. A path already recorded as a
+	// link keeps that type — git's rule is that add does not turn it into a
+	// regular file. The hint is read before splitDefaultVariant, because an
+	// explicit add may be inheriting its type from the default entry that the
+	// split removes.
+	typeHint, haveHint := idx.Entries[key]
+	if !haveHint && oss != 0 && !auto {
+		typeHint, haveHint = idx.Entries[entryKey(relFormatted, 0)]
+	}
+	keepSymlink := !isSymlink && fi.Mode().IsRegular() && !r.symlinksEnabled() &&
+		haveHint && IsSymlinkMode(typeHint.Mode)
+
 	var data []byte
 	if isSymlink {
 		target, err := os.Readlink(absPath)
 		if err != nil {
 			return false, fmt.Errorf("read symlink: %w", err)
 		}
-		data = []byte(target)
+		data = []byte(linkTargetFromDisk(target))
 	} else {
 		data, err = ioutil.ReadFile(absPath)
 		if err != nil {
 			return false, fmt.Errorf("read file: %w", err)
 		}
 
-		// Reject LFS placeholder files — user must lfs-pull first
-		if string(data) == "qin-lfs" && r.hasAnyLazyEntry(filepath.ToSlash(relPath)) {
+		// Reject LFS placeholder files — user must lfs-pull first. A degraded
+		// symlink holds a target string, not file content, so the check does
+		// not apply to it.
+		if !keepSymlink && string(data) == "qin-lfs" && r.hasAnyLazyEntry(filepath.ToSlash(relPath)) {
 			return false, fmt.Errorf("cannot add placeholder file '%s': use 'lfs-pull' to fetch real content first", filePath)
 		}
 	}
@@ -518,7 +562,7 @@ func (r *Repository) addFileToIndex(filePath string, oss uint8, auto bool, idx *
 	contentHash := core.HashFromBytes(data)
 
 	var h core.Hash
-	if isSymlink {
+	if isSymlink || keepSymlink {
 		h, err = r.StoreObject(core.ObjectBlob, data)
 	} else {
 		h, err = r.StoreChunkedFile(data)
@@ -528,8 +572,10 @@ func (r *Repository) addFileToIndex(filePath string, oss uint8, auto bool, idx *
 	}
 
 	mode := uint32(fi.Mode())
+	if keepSymlink {
+		mode = typeHint.Mode
+	}
 
-	key := entryKey(filepath.ToSlash(relPath), oss)
 	// As in the directory branch: splitting belongs to the explicit tag, not
 	// to a plain add following the visible variant.
 	split := !auto && splitDefaultVariant(idx, relFormatted, oss)

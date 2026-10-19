@@ -281,10 +281,13 @@ qin lfs pull large-file.bin
 | `core.chunk_threshold` | 分块阈值（字节），默认 4194304 |
 | `core.chunk_max_size` | 最大分块大小（字节），默认 8388608 |
 | `core.bare` | 无工作树，标记为推送目标，不保护任何分支，默认 false |
+| `core.symlinks` | 是否为已存储的符号链接创建真链接：false 把链接目标写成普通文件，默认 Windows 为 false、其他平台为 true |
 | `diff.max_size` | 跳过内容 diff 的文件大小阈值（字节），默认 524288 |
 | `diff.max_lines` | 跳过行级 diff 的行数阈值，默认 2000 |
 | `user.name` | 提交作者姓名 |
 | `user.email` | 提交作者邮箱 |
+
+`core.symlinks` 与 git 对齐：关闭时检出的是内容为链接目标文本的普通文件；索引与提交里的类型仍是符号链接，`status` 按该文本比较，`add` 不会把它改成普通文件。Windows 上 `os.Symlink` 会把目标中的 `/` 写成 `\`，读回比较时统一还原为 `/`，否则同一链接每次检出后都会被报为已修改。启用真链接在 Windows 上需要开发者模式或相应权限。
 
 ## 许可证
 

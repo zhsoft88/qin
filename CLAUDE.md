@@ -47,11 +47,22 @@ The split is unconditional: identical content is copied too, so a path whose def
 
 ### Symlinks
 
-qin follows git's model: **a symlink is tracked as the link itself, never as its target.** `add` stores the target string as the blob and a mode carrying `os.ModeSymlink`; checkout recreates the link. This holds whatever the link points at — a file, a directory, or nothing at all.
+qin follows git's model: **a symlink is tracked as the link itself, never as its target.** `add` stores the target string as the blob and a mode carrying `os.ModeSymlink`; checkout recreates the link, or — with `core.symlinks` off — writes the target text as an ordinary file while the recorded type stays a link. This holds whatever the link points at — a file, a directory, or nothing at all.
 
 **Every walk that decides directory-vs-file uses `Lstat`.** `addFileOrDir` and `addFileOrDirExpr` in `cmd/qin/main.go` are the two that matter, and `status`'s untracked scan gets it for free (its dirents come from `Readdir`, which is lstat semantics). This is not a detail to be tidied away: `Stat` resolves a link to a directory, so the walk takes the directory branch, `ReadDir`s the target, and records its contents under the *link's* path — one tree stored twice under two names, with the link itself never recorded. `status` then reports the link untracked forever, because the index has no entry at that exact path and nothing descends through a link to look for one. That is exactly the shape `cipd` writes (`.cipd/pkgs/<n>/_current` → a sibling directory), which is where the defect surfaced.
 
 **Consequences that other code has to keep.** The index can never hold both `X` and `X/child` — `checkParentsNotSymlinks` exists to reject the second, since a hostile tree could otherwise write through a link to somewhere outside the repository. And `status` must compare a tracked link by *reading the link* (`os.Readlink`), not by reading through it: `entry.ContentHash` is the hash of the target string, so `ioutil.ReadFile` would hash whatever the link points at, and every tracked link to a file would be reported `modified` on every run. Links are also deliberately excluded from the stat fast path — a link's own `lstat` says nothing about its target, which can change without touching it.
+
+**`core.symlinks` and degraded checkout.** An ordinary Windows user cannot create a link, so qin follows git: `core.symlinks` defaults to false on Windows and true elsewhere. It is a `*bool` because the three states are distinct — nil means "platform default", and a repository's config must not freeze the machine that wrote it; explicit false has to survive `omitempty`-style Save/Load, which a plain bool cannot do. `symlinksDefault` asks `hostGOOS()`, the same testable platform hook `hostPathError` uses. When disabled, `writeFileFromEntry` writes the target text as a regular file (0666, subject to the umask) instead of calling `os.Symlink`; the tree and index entry keep `SymlinkMode`.
+
+Everything downstream compensates for a type the filesystem no longer shows:
+
+- `status` branches on the on-disk `Lstat` type: a real link is read with `Readlink`; the degraded regular file is hashed by its bytes, which are the recorded target; anything else at a link path is a type change and is reported `modified`, not skipped.
+- `add` takes a type hint from the visible index entry and keeps `SymlinkMode` when the disk holds a regular file and symlinks are disabled. The hint is read **before** `splitDefaultVariant`, because an explicit `--os` add may inherit the type from the default entry the split removes. With symlinks enabled the hint is deliberately not used: a regular file there is a real type change.
+
+`os.Symlink` converts `/` to `\` in link content on Windows, so `linkTargetFromDisk` normalizes `Readlink` output back to `/`; without it the same link would hash differently after every checkout and be reported modified forever. Only `Readlink` output is normalized — a degraded file's bytes are the stored target verbatim, and a backslash is an ordinary byte in a Unix filename.
+
+Deliberately not implemented, and why: git for Windows's phantom directory-symlink retry (a link whose directory target arrives later); reading a real link's target text in `diff`; the stat fast path for link entries; and patch/format-patch mode representation. These are separate behaviors, not gaps this feature is expected to close.
 
 ### Tree Entry Names
 
@@ -190,7 +201,8 @@ The invariant every other decision serves: **the monitor may only remove work, n
   HEAD                — "ref: refs/heads/main" or a commit hash
   config              — JSON config: core.chunk_min_size, core.chunk_threshold,
                         core.chunk_max_size, core.fsmonitor, core.bare,
-                        diff.max_size, diff.max_lines, user.name, user.email
+                        core.symlinks, diff.max_size, diff.max_lines,
+                        user.name, user.email
                         (the key list and defaults live in `configKeys`, config.go)
   index               — binary staging area (QINIDX v1; JSON auto-migrated)
   untracked-cache.json— per-directory untracked lists for fast status (git core.untrackedCache style)
