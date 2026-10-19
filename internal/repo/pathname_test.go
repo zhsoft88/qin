@@ -2,10 +2,13 @@ package repo
 
 import (
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -186,6 +189,88 @@ func TestRestoreSkipsUnrepresentableName(t *testing.T) {
 	}
 	if _, ok := idx.Entries[entryKey(name, 0)]; !ok {
 		t.Fatalf("skipped path missing from the index: %v", idx.Entries)
+	}
+}
+
+// TestRestoreReportsEverySkippedName pins the report shape: every name, one per
+// line, with no truncated "... and N more" tail. It deliberately exceeds the
+// old ten-name summary limit, and includes a name holding a real newline so the
+// line-oriented format has to stay unambiguous.
+func TestRestoreReportsEverySkippedName(t *testing.T) {
+	old := hostGOOS
+	hostGOOS = func() string { return "windows" }
+	defer func() { hostGOOS = old }()
+
+	base, err := ioutil.TempDir("", "qin-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(base)
+
+	repoDir := filepath.Join(base, "repo")
+	if err := os.MkdirAll(repoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Init(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries := []hostileEntry{{name: "ok.txt", mode: 0644, content: "fine"}}
+	var want []string
+	for i := 0; i < 15; i++ {
+		name := fmt.Sprintf("bad%02d\\name.txt", i)
+		want = append(want, name)
+		entries = append(entries, hostileEntry{name: name, mode: 0644, content: "x"})
+	}
+	newlineName := "newline\nname.txt"
+	want = append(want, newlineName)
+	entries = append(entries, hostileEntry{name: newlineName, mode: 0644, content: "x"})
+	hostileCommit(t, r, entries)
+
+	err = r.SwitchBranch("main")
+	if err == nil {
+		t.Fatal("checkout did not report the names it could not create")
+	}
+	msg := err.Error()
+
+	sort.Strings(want)
+	lines := strings.Split(msg, "\n")
+	if len(lines) != 1+len(want) {
+		t.Fatalf("report has %d lines, want %d (one per name):\n%s", len(lines), 1+len(want), msg)
+	}
+	if header := "could not restore these paths on windows:"; lines[0] != header {
+		t.Errorf("header = %q, want %q", lines[0], header)
+	}
+	for i, name := range want {
+		display := "  " + name
+		if nameNeedsQuoting(name) {
+			display = "  " + strconv.Quote(name)
+		}
+		if lines[i+1] != display {
+			t.Errorf("line %d = %q, want %q", i+2, lines[i+1], display)
+		}
+	}
+	if !strings.Contains(msg, strconv.Quote(newlineName)) {
+		t.Errorf("newline name is not quoted: %v", err)
+	}
+	if strings.Contains(msg, "... and ") || strings.Contains(msg, "more") {
+		t.Errorf("report still summarizes the names: %v", err)
+	}
+
+	// The restorable entry is on disk; every skipped entry stays in the index
+	// so the next commit does not quietly drop it.
+	if got, err := ioutil.ReadFile(filepath.Join(repoDir, "ok.txt")); err != nil || string(got) != "fine" {
+		t.Fatalf("ok.txt = %q, %v; want the restored content", got, err)
+	}
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range want {
+		if _, ok := idx.Entries[entryKey(name, 0)]; !ok {
+			t.Errorf("skipped path %q missing from the index", name)
+		}
 	}
 }
 

@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/zhsoft88/qin/internal/core"
 )
@@ -201,9 +203,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 	}
 
 	if len(skipped) > 0 {
-		sort.Strings(skipped)
-		return fmt.Errorf("%d path(s) cannot be created on %s: %s",
-			len(skipped), hostGOOS(), summarizePaths(skipped))
+		return skippedPathsError(skipped, hostGOOS())
 	}
 	return nil
 }
@@ -224,14 +224,37 @@ func addTreeVariants(idx *Index, name string, entries []TreeEntry) {
 	}
 }
 
-// summarizePaths lists names for an error message without letting a tree with
-// thousands of unrepresentable entries produce one unreadable line.
-func summarizePaths(names []string) string {
-	const max = 10
-	if len(names) <= max {
-		return strings.Join(names, ", ")
+// skippedPathsError reports every entry restoreCommit could not write. Nothing
+// is truncated: a summary like "... and N more" hides the paths the user needs
+// to act on. Names are sorted so the message is stable, and each gets its own
+// line. A name containing a control character is Go-quoted: Unix filenames may
+// legally contain a newline, and printing one raw would split it across lines
+// and make the one-name-per-line report ambiguous. Ordinary names, including
+// the backslash-bearing ones Windows refuses, stay unquoted and readable.
+func skippedPathsError(names []string, goos string) error {
+	sort.Strings(names)
+	var b strings.Builder
+	fmt.Fprintf(&b, "could not restore these paths on %s:", goos)
+	for _, name := range names {
+		b.WriteString("\n  ")
+		if nameNeedsQuoting(name) {
+			b.WriteString(strconv.Quote(name))
+			continue
+		}
+		b.WriteString(name)
 	}
-	return fmt.Sprintf("%s, ... and %d more", strings.Join(names[:max], ", "), len(names)-max)
+	return errors.New(b.String())
+}
+
+// nameNeedsQuoting reports whether printing name raw would corrupt the
+// line-oriented report.
+func nameNeedsQuoting(name string) bool {
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // ListBranches returns all branch names and marks the current one.
