@@ -242,53 +242,7 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 		if IsSubmoduleMode(entry.Mode) || entry.Hash.IsZero() {
 			continue
 		}
-		// Stat fast path: skip the content read+hash when size and mtime
-		// match the index entry and the entry predates the index write.
-		// Symlinks are excluded (their on-disk content can change without
-		// touching the link's own stat). A mismatch only means extra work,
-		// never a missed change.
-		if !IsSymlinkMode(entry.Mode) && entry.Mtime != 0 &&
-			fi.Size() == entry.Size &&
-			fi.ModTime().UnixNano() == entry.Mtime &&
-			entry.Mtime < idxMtime {
-			continue
-		}
-		// A symlink is stored as a blob holding its target string (see
-		// AddFileToIndex), so it has to be read back as a link. ReadFile would
-		// follow it and hash whatever it points at — a link to a file would be
-		// reported modified on every run, and one to a directory escaped that
-		// only because ReadFile fails on a directory.
-		var data []byte
-		if IsSymlinkMode(entry.Mode) {
-			switch {
-			case fi.Mode()&os.ModeSymlink != 0:
-				target, err := os.Readlink(fullPath)
-				if err != nil {
-					continue
-				}
-				data = []byte(linkTargetFromDisk(target))
-			case !r.symlinksEnabled() && fi.Mode().IsRegular():
-				// core.symlinks=false materializes the link as a regular file
-				// whose bytes are the target text. Read those bytes, not
-				// through the file: the recorded content is the target.
-				data, err = ioutil.ReadFile(fullPath)
-				if err != nil {
-					continue
-				}
-			default:
-				// The index records a link but the worktree holds neither a
-				// link nor the degraded file: a type change is a modification.
-				s.Modified = append(s.Modified, path)
-				continue
-			}
-		} else {
-			data, err = ioutil.ReadFile(fullPath)
-			if err != nil {
-				continue
-			}
-		}
-		contentHash := core.HashFromBytes(data)
-		if contentHash != entry.ContentHash {
+		if r.trackedEntryChanged(fullPath, entry, fi, idxMtime) {
 			s.Modified = append(s.Modified, path)
 		}
 	}
@@ -452,6 +406,154 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	mon.save(r, s.Deleted, s.Modified)
 
 	return s, nil
+}
+
+// trackedEntryChanged reports whether the worktree file at fullPath differs
+// from what entry records. The caller has established that fullPath exists
+// and is not a submodule or empty-directory entry.
+//
+// This is status's per-entry comparison, factored out so StageTrackedChanges
+// (commit -a) reaches the same conclusion without a second copy of the stat
+// fast path, symlink reading or degraded-link rules. A read failure returns
+// false: status reports such a path as neither modified nor deleted, and
+// staging must not turn a transient error into a commit.
+func (r *Repository) trackedEntryChanged(fullPath string, entry IndexEntry, fi os.FileInfo, idxMtime int64) bool {
+	// Stat fast path: skip the content read+hash when size and mtime
+	// match the index entry and the entry predates the index write.
+	// Symlinks are excluded (their on-disk content can change without
+	// touching the link's own stat). A mismatch only means extra work,
+	// never a missed change.
+	if !IsSymlinkMode(entry.Mode) && entry.Mtime != 0 &&
+		fi.Size() == entry.Size &&
+		fi.ModTime().UnixNano() == entry.Mtime &&
+		entry.Mtime < idxMtime {
+		return false
+	}
+	// A symlink is stored as a blob holding its target string (see
+	// AddFileToIndex), so it has to be read back as a link. ReadFile would
+	// follow it and hash whatever it points at — a link to a file would be
+	// reported modified on every run, and one to a directory escaped that
+	// only because ReadFile fails on a directory.
+	var data []byte
+	var err error
+	if IsSymlinkMode(entry.Mode) {
+		switch {
+		case fi.Mode()&os.ModeSymlink != 0:
+			var target string
+			target, err = os.Readlink(fullPath)
+			if err != nil {
+				return false
+			}
+			data = []byte(linkTargetFromDisk(target))
+		case !r.symlinksEnabled() && fi.Mode().IsRegular():
+			// core.symlinks=false materializes the link as a regular file
+			// whose bytes are the target text. Read those bytes, not
+			// through the file: the recorded content is the target.
+			data, err = ioutil.ReadFile(fullPath)
+			if err != nil {
+				return false
+			}
+		default:
+			// The index records a link but the worktree holds neither a
+			// link nor the degraded file: a type change is a modification.
+			return true
+		}
+	} else {
+		data, err = ioutil.ReadFile(fullPath)
+		if err != nil {
+			return false
+		}
+	}
+	return core.HashFromBytes(data) != entry.ContentHash
+}
+
+// StageTrackedChanges stages the changes `commit -a` is responsible for: a
+// tracked file whose worktree content differs from the index is re-added under
+// the variant this host sees, and a tracked path missing from disk loses every
+// index entry for its name — exactly what `rm` removes. Untracked files are
+// never considered, and no directory walk happens: the index alone says what
+// to examine, so the untracked scan that dominates `status` on a large tree is
+// not part of this operation.
+//
+// Ignore rules do not apply. These paths are already tracked, and qin's rules
+// — like git's — only classify untracked files; refusing a tracked file just
+// because it now matches a pattern would let .qinignore block a commit -a
+// forever, with no way to reconcile the index.
+//
+// The index is saved once, after every path has been processed. On error no
+// entry is persisted, so a failed commit -a leaves the staging area as it was.
+func (r *Repository) StageTrackedChanges() (modified, deleted int, err error) {
+	printProgress("loading index...")
+	idx, err := r.LoadIndex()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// Same racily-clean bound as status: an entry whose mtime is at or after
+	// the index write must be re-hashed, not trusted.
+	var idxMtime int64
+	if fi, err := os.Stat(r.indexPath()); err == nil {
+		idxMtime = fi.ModTime().UnixNano()
+	}
+
+	visible := visibleEntries(idx.Entries, currentOS())
+
+	printProgress("comparing worktree...")
+	var modifiedPaths, deletedPaths []string
+	for name, entry := range visible {
+		fullPath := filepath.Join(r.Path, name)
+		fi, statErr := os.Lstat(fullPath)
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				deletedPaths = append(deletedPaths, name)
+			}
+			continue
+		}
+		if IsSubmoduleMode(entry.Mode) || entry.Hash.IsZero() {
+			continue // directory entries (empty dirs, submodules) have no content
+		}
+		if r.trackedEntryChanged(fullPath, entry, fi, idxMtime) {
+			modifiedPaths = append(modifiedPaths, name)
+		}
+	}
+	// Deterministic order: the first reported error must not depend on map
+	// iteration. Removing a path deletes its variants, which has no order to
+	// preserve beyond the name itself.
+	sort.Strings(modifiedPaths)
+	sort.Strings(deletedPaths)
+
+	changed := false
+	for _, name := range modifiedPaths {
+		staged, err := r.addFileToIndex(filepath.Join(r.Path, name), 0, true, true, idx)
+		if err != nil {
+			return 0, 0, fmt.Errorf("stage %s: %w", name, err)
+		}
+		if staged {
+			modified++
+			changed = true
+		}
+	}
+	for _, name := range deletedPaths {
+		removed := false
+		for key := range idx.Entries {
+			if p, _ := parseKey(key); p == name {
+				delete(idx.Entries, key)
+				removed = true
+			}
+		}
+		if removed {
+			deleted++
+			changed = true
+		}
+	}
+
+	if changed {
+		if err := r.SaveIndex(idx); err != nil {
+			return 0, 0, err
+		}
+	}
+	endProgressLine()
+	return modified, deleted, nil
 }
 
 // clearLine clears the current terminal line by printing spaces.

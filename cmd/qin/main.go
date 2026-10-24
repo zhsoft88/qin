@@ -894,17 +894,54 @@ func runRm(args []string) error {
 }
 
 // ---- commit ----
+
+// expandCommitAll rewrites git's bundled -am spellings, which Go's flag
+// package cannot parse: -am, -am=msg and -ammsg all mean -a -m [msg]. Coming
+// from git, -am is the usual way to ask for this, and "flag provided but not
+// defined: -am" would be a poor answer to it. `a` takes no value, so the rest
+// of the bundle belongs to `m`, exactly as git's short-option parsing reads it.
+func expandCommitAll(args []string) []string {
+	out := make([]string, 0, len(args)+1)
+	for _, a := range args {
+		switch {
+		case a == "-am":
+			out = append(out, "-a", "-m")
+		case strings.HasPrefix(a, "-am="):
+			out = append(out, "-a", "-m="+a[len("-am="):])
+		case strings.HasPrefix(a, "-am"):
+			out = append(out, "-a", "-m", a[len("-am"):])
+		default:
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 func runCommit(args []string) error {
 	fs := flag.NewFlagSet("commit", flag.ExitOnError)
 	msg := fs.String("m", "", "commit message")
 	author := fs.String("author", "", "author (default: from config)")
-	fs.Parse(args)
+	all := fs.Bool("a", false, "stage modified and deleted tracked files before committing")
+	fs.BoolVar(all, "all", false, "stage modified and deleted tracked files before committing")
+	fs.Parse(expandCommitAll(args))
 	if *msg == "" {
 		return fmt.Errorf("commit message required (-m)")
 	}
 	r, err := findRepo()
 	if err != nil {
 		return err
+	}
+	if *all {
+		// Both kinds are staged before WriteCommit: modifications are re-added,
+		// deletions lose their index entries. Untracked files are untouched —
+		// this is `commit -a`, not `add .`.
+		modified, deleted, err := r.StageTrackedChanges()
+		if err != nil {
+			return err
+		}
+		if modified > 0 || deleted > 0 {
+			fmt.Printf("staged %d modified, %d deleted file(s)\n", modified, deleted)
+		}
 	}
 	auth := *author
 	if auth == "" {

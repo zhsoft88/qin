@@ -368,14 +368,14 @@ func (r *Repository) addFileInternal(filePath string, oss uint8, auto bool) erro
 // with the same object hash and mode is left untouched (git-style skip).
 // Does NOT save the index — caller must call SaveIndex.
 func (r *Repository) AddFileToIndex(filePath string, oss uint8, idx *Index) (bool, error) {
-	return r.addFileToIndex(filePath, oss, false, idx)
+	return r.addFileToIndex(filePath, oss, false, false, idx)
 }
 
 // AddFileToIndexVisible is the plain-add form of AddFileToIndex: the file is
 // staged under the variant this host sees rather than under a caller-supplied
 // mask. See AddFile for why that is the right default.
 func (r *Repository) AddFileToIndexVisible(filePath string, idx *Index) (bool, error) {
-	return r.addFileToIndex(filePath, 0, true, idx)
+	return r.addFileToIndex(filePath, 0, true, false, idx)
 }
 
 // VisibleOSMask reports the mask a plain add of name would write, given idx.
@@ -444,7 +444,12 @@ func splitDefaultVariant(idx *Index, name string, oss uint8) bool {
 	return true
 }
 
-func (r *Repository) addFileToIndex(filePath string, oss uint8, auto bool, idx *Index) (bool, error) {
+// tracked marks a path the index already holds and the caller is refreshing
+// (commit -a). Ignore rules are skipped for such a path: they exist to decide
+// what an untracked file is, and a tracked file that later matches a pattern
+// must still be stageable, or the index could never be reconciled with the
+// working tree again.
+func (r *Repository) addFileToIndex(filePath string, oss uint8, auto, tracked bool, idx *Index) (bool, error) {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return false, fmt.Errorf("resolve path: %w", err)
@@ -476,16 +481,19 @@ func (r *Repository) addFileToIndex(filePath string, oss uint8, auto bool, idx *
 		return false, fmt.Errorf("path inside %s cannot be tracked", QinDir)
 	}
 
-	// The ignore rules are consulted first. Their original reason — standing in
-	// for a name rule that refused more than escaping — is gone, but the order
-	// is still right: an ignored path should not be considered at all, so
-	// `qin add .` must not fail over a file the user has put out of scope.
-	ignorer, err := r.LoadIgnoreMatcher()
-	if err != nil {
-		return false, err
-	}
-	if ignorer.Match(relFormatted, false) {
-		return false, ErrIgnored
+	// The ignore rules are consulted first for an ordinary add (a tracked path
+	// skips them — see the parameter above). Their original reason — standing
+	// in for a name rule that refused more than escaping — is gone, but the
+	// order is still right: an ignored path should not be considered at all,
+	// so `qin add .` must not fail over a file the user has put out of scope.
+	if !tracked {
+		ignorer, err := r.LoadIgnoreMatcher()
+		if err != nil {
+			return false, err
+		}
+		if ignorer.Match(relFormatted, false) {
+			return false, ErrIgnored
+		}
 	}
 
 	// The name must be safe to join onto the working tree root; LoadTree applies

@@ -76,13 +76,15 @@ qin clone http://example.com/repo myrepo
 | `init [--bare] [<path>]` | 初始化新仓库（默认当前目录）；`--bare` 标记为推送目标（无工作树，任何分支都不受保护） |
 | `add <file\|@file> [--os \| --os-match <expr>] [--exclude <glob> \| --exclude @file]` | 暂存文件（`--os` 标记为当前 OS 变体；`--os-match` 指定 OS 表达式；`@file` 从文件读取待暂存路径，每行一个，空行和 `#` 注释行忽略，条目支持 shell 通配符；`--exclude` 排除匹配文件，`--exclude @file` 从文件读取排除模式） |
 | `rm <file>` | 移除已暂存文件 |
-| `commit -m <msg>` | 从暂存区创建提交 |
+| `commit [-a] -m <msg>` | 从暂存区创建提交；`-a` 提交前自动暂存**已跟踪**文件的修改、并把工作区已删除的已跟踪文件从索引移除（不包含未跟踪文件，等同 git 的 `commit -a`） |
 | `status` | 查看工作区状态 |
 | `log [-n <num>] [--graph] [--all]` | 查看提交历史（`--graph` 分支可视化，`--all` 显示所有分支，`-n` 限制条数） |
 | `diff [--cached] [<ref> <ref>]` | 查看文件级别变更 |
 | `cat <hash>` | 打印对象内容 |
 | `ls [<path>\|<glob>]...` | 列出已暂存文件；无参数时列出全部；参数按当前目录解析为文件/目录前缀或 shell 通配符，无匹配时静默 |
 | `show <file> [--os <os>]` | 查看文件的指定 OS 变体内容 |
+
+`commit -a` 只处理**已跟踪**路径：修改的重新暂存，工作区已删除的从索引移除并记为删除；未跟踪文件不会进入提交，仍需先 `qin add`。删除的文件不需要事先 `qin rm`。`.qinignore` 只用于未跟踪文件，不会阻止已跟踪文件被 `-a` 暂存。
 
 ### 分支与标签
 

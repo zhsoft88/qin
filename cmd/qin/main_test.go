@@ -1020,3 +1020,23 @@ func TestRunLsEscapedLiteralWildcard(t *testing.T) {
 		t.Errorf("unescaped: %v, want both files %v", got, want)
 	}
 }
+
+// git's -am is the usual spelling of "commit everything tracked"; Go's flag
+// package would reject it, so it is rewritten before parsing.
+func TestExpandCommitAll(t *testing.T) {
+	cases := []struct {
+		in, want []string
+	}{
+		{[]string{"-am", "msg"}, []string{"-a", "-m", "msg"}},
+		{[]string{"-am=msg"}, []string{"-a", "-m=msg"}},
+		{[]string{"-ammsg"}, []string{"-a", "-m", "msg"}},
+		{[]string{"-a", "-m", "msg"}, []string{"-a", "-m", "msg"}},
+		{[]string{"-m", "msg", "-a"}, []string{"-m", "msg", "-a"}},
+		{[]string{"--all", "-m", "msg"}, []string{"--all", "-m", "msg"}},
+	}
+	for _, c := range cases {
+		if got := expandCommitAll(c.in); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("expandCommitAll(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
