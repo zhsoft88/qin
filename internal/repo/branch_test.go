@@ -228,13 +228,13 @@ func TestSwitchBranchEndsProgressLine(t *testing.T) {
 		capture.Close()
 		os.Remove(capture.Name())
 	}()
-	lastProgressLen = 0
+	maxProgressLen = 0
 
 	if err := r.SwitchBranch("feature"); err != nil {
 		t.Fatal(err)
 	}
-	if lastProgressLen != 0 {
-		t.Errorf("progress state left open: lastProgressLen = %d", lastProgressLen)
+	if maxProgressLen != 0 {
+		t.Errorf("progress state left open: maxProgressLen = %d", maxProgressLen)
 	}
 	if err := capture.Sync(); err != nil {
 		t.Fatal(err)

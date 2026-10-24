@@ -573,7 +573,7 @@ func TestPrintProgressErasesTail(t *testing.T) {
 	os.Stderr = f
 	defer func() { os.Stderr = old }()
 
-	lastProgressLen = 0 // reset shared state
+	maxProgressLen = 0 // reset shared state
 
 	// A shorter follow-up must erase the previous line's tail
 	printProgress("scanned: 500 dirs")
@@ -583,6 +583,15 @@ func TestPrintProgressErasesTail(t *testing.T) {
 	// A longer follow-up must be written in full
 	printProgress("scanned: 1 dirs")
 	printProgress("scanned: 500 dirs")
+	endProgressLine()
+
+	// The widest line of the group must be cleared even after the width has
+	// shrunk and then grown back below it: padding only to the immediately
+	// preceding message leaves the wide line's tail behind.
+	long := "scanned: " + strings.Repeat("x", 120)
+	printProgress("%s", long)
+	printProgress("scanned: 1 dirs")
+	printProgress("scanned: 20 dirs")
 	endProgressLine()
 
 	if err := f.Sync(); err != nil {
@@ -605,6 +614,14 @@ func TestPrintProgressErasesTail(t *testing.T) {
 	visible = renderProgressLine(lines[1])
 	if !strings.HasPrefix(visible, "scanned: 500 dirs") {
 		t.Fatalf("longer message corrupted: %q", visible)
+	}
+
+	visible = renderProgressLine(lines[2])
+	if strings.Contains(visible, "x") {
+		t.Fatalf("residue of the widest earlier line remains: %q", visible)
+	}
+	if !strings.HasPrefix(visible, "scanned: 20 dirs") {
+		t.Fatalf("current message missing: %q", visible)
 	}
 }
 
@@ -1172,7 +1189,7 @@ func TestEndProgressLineWithoutProgressWritesNothing(t *testing.T) {
 	os.Stderr = f
 	defer func() { os.Stderr = old }()
 
-	lastProgressLen = 0
+	maxProgressLen = 0
 	endProgressLine()
 	if err := f.Sync(); err != nil {
 		t.Fatal(err)

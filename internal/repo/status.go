@@ -559,37 +559,38 @@ func clearLine(w io.Writer) {
 	fmt.Fprintf(w, "\r%s\r", spaces80)
 }
 
-// lastProgressLen is the length of the most recent in-place progress line
-// written to stderr. A follow-up progress line pads with spaces to at least
-// this length, erasing the previous line's tail — a bare \r leaves residue
-// when the previous line was longer than the current one.
-var lastProgressLen int
+// maxProgressLen is the width of the longest text written since the current
+// in-place progress line began. Every rewrite first clears that full width, so
+// the tail of any earlier message is erased — not just the tail of the message
+// immediately before it. Padding to the previous message alone is not enough:
+// the width can shrink below a still-visible earlier one, and that earlier
+// text would survive the rewrite.
+var maxProgressLen int
 
-// printProgress rewrites the current stderr line with progress text,
-// erasing the tail of a previously longer line.
+// printProgress rewrites the current stderr line with progress text. The line
+// is cleared to its widest recorded width before the new text is written.
 func printProgress(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	pad := lastProgressLen - len(msg)
+	pad := maxProgressLen - len(msg)
 	if pad < 0 {
 		pad = 0
 	}
-	if pad > len(spaces80) {
-		pad = len(spaces80)
+	fmt.Fprintf(os.Stderr, "\r%s%s\r", msg, strings.Repeat(" ", pad))
+	if len(msg) > maxProgressLen {
+		maxProgressLen = len(msg)
 	}
-	fmt.Fprintf(os.Stderr, "\r%s%s\r", msg, spaces80[:pad])
-	lastProgressLen = len(msg)
 }
 
-// endProgressLine scrolls the current progress line and resets the
-// tail-padding state for the next progress line. It does nothing when no line
-// is outstanding, so a function can defer it unconditionally and every return
-// path — an error included — leaves the cursor at the start of a fresh line.
+// endProgressLine scrolls the current progress line and resets the width for
+// the next progress line. It does nothing when no line is outstanding, so a
+// function can defer it unconditionally and every return path — an error
+// included — leaves the cursor at the start of a fresh line.
 func endProgressLine() {
-	if lastProgressLen == 0 {
+	if maxProgressLen == 0 {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "\n")
-	lastProgressLen = 0
+	maxProgressLen = 0
 }
 
 // truncateName shortens a file path for display, keeping start and end.
