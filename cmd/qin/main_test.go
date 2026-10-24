@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -708,5 +709,314 @@ func TestRunAddGlobDoesNotFollowSymlink(t *testing.T) {
 	}
 	if got := indexedPaths(idx); !reflect.DeepEqual(got, []string{"real.txt"}) {
 		t.Fatalf("indexed %v, want only real.txt (link must not be followed)", got)
+	}
+}
+
+// ---- ls filters ----
+
+// captureStdout runs fn with os.Stdout replaced by a pipe and returns what it
+// printed. The package's tests are not parallel, so swapping the process-wide
+// os.Stdout is safe here.
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	old := os.Stdout
+	rd, wr, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = wr
+	defer func() {
+		os.Stdout = old
+		rd.Close()
+	}()
+
+	done := make(chan string, 1)
+	go func() {
+		b, _ := ioutil.ReadAll(rd)
+		done <- string(b)
+	}()
+
+	runErr := fn()
+	wr.Close()
+	return <-done, runErr
+}
+
+// lsOutputPaths extracts the repo path from each `qin ls` line, whose format
+// is: "<short hash>  <size>  [<os>]  <path>[  [N chunks]]".
+func lsOutputPaths(out string) []string {
+	var paths []string
+	for _, line := range strings.Split(strings.TrimSuffix(out, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		i := strings.Index(line, "]  ")
+		if i < 0 {
+			continue
+		}
+		p := line[i+3:]
+		if j := strings.Index(p, "  ["); j >= 0 {
+			p = p[:j]
+		}
+		paths = append(paths, p)
+	}
+	return paths
+}
+
+func TestResolveLsFilter(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	cwd := root
+
+	cases := []struct {
+		name    string
+		arg     string
+		ok      bool
+		pattern string
+		glob    bool
+	}{
+		{"file", "a.txt", true, "a.txt", false},
+		{"dir", "src", true, "src", false},
+		{"root", ".", true, "", false},
+		{"dotdot cleanup", filepath.Join("src", "..", "a.txt"), true, "a.txt", false},
+		{"glob after cleanup", "./src/../*.go", true, "*.go", true},
+		{"glob", "src/*.go", true, "src/*.go", true},
+		{"globstar", "src/**", true, "src/**", true},
+		{"absolute glob", filepath.Join(root, "src", "*.go"), true, "src/*.go", true},
+		{"outside", filepath.Join("..", "out.txt"), false, "", false},
+	}
+	for _, tc := range cases {
+		f, ok := resolveLsFilter(tc.arg, cwd, root)
+		if ok != tc.ok {
+			t.Errorf("%s: ok = %v, want %v", tc.name, ok, tc.ok)
+			continue
+		}
+		if !ok {
+			continue
+		}
+		if f.pattern != tc.pattern || f.glob != tc.glob {
+			t.Errorf("%s: filter = {%q, glob=%v}, want {%q, glob=%v}",
+				tc.name, f.pattern, f.glob, tc.pattern, tc.glob)
+		}
+	}
+
+	if runtime.GOOS == "windows" {
+		return // backslash is a separator there, not an escape
+	}
+	escaped := []struct {
+		arg     string
+		pattern string
+		glob    bool
+	}{
+		{`a\*b`, "a*b", false},
+		{`docs\[old\]`, "docs[old]", false},
+		{`a\*b/*.go`, `a\*b/*.go`, true},
+	}
+	for _, tc := range escaped {
+		f, ok := resolveLsFilter(tc.arg, cwd, root)
+		if !ok || f.pattern != tc.pattern || f.glob != tc.glob {
+			t.Errorf("%q: filter = {%q, glob=%v}, ok=%v; want {%q, glob=%v}",
+				tc.arg, f.pattern, f.glob, ok, tc.pattern, tc.glob)
+		}
+	}
+}
+
+func TestLsMatchesAny(t *testing.T) {
+	lit := func(p string) lsFilter { return lsFilter{pattern: p} }
+	glob := func(p string) lsFilter { return lsFilter{pattern: p, glob: true} }
+
+	cases := []struct {
+		name    string
+		path    string
+		filters []lsFilter
+		want    bool
+	}{
+		{"literal dir itself", "src", []lsFilter{lit("src")}, true},
+		{"literal child", "src/a.go", []lsFilter{lit("src")}, true},
+		{"literal does not match sibling prefix", "srcx/a.go", []lsFilter{lit("src")}, false},
+		{"literal is anchored", "x/src/a.go", []lsFilter{lit("src")}, false},
+		{"root matches everything", "anything/x", []lsFilter{lit("")}, true},
+		{"glob top level", "a.go", []lsFilter{glob("*.go")}, true},
+		{"glob does not cross a slash", "src/a.go", []lsFilter{glob("*.go")}, false},
+		{"globstar matches the dir itself", "src", []lsFilter{glob("src/**")}, true},
+		{"globstar matches deep", "src/deep/x.go", []lsFilter{glob("src/**")}, true},
+		{"single star stays one level", "src/deep/x.go", []lsFilter{glob("src/*.go")}, false},
+		{"literal star name", "*.go", []lsFilter{lit("*.go")}, true},
+		{"literal star is not a pattern", "a.go", []lsFilter{lit("*.go")}, false},
+		{"union", "b.txt", []lsFilter{lit("a.txt"), glob("*.txt")}, true},
+		{"no filters", "a.go", nil, false},
+	}
+	for _, tc := range cases {
+		if got := lsMatchesAny(tc.path, tc.filters); got != tc.want {
+			t.Errorf("%s: lsMatchesAny(%q) = %v, want %v", tc.name, tc.path, got, tc.want)
+		}
+	}
+}
+
+// stageLsRepo creates the tree shared by the runLs tests and returns its root.
+func stageLsRepo(t *testing.T) string {
+	t.Helper()
+	_, dir := newAddRepo(t)
+	for _, f := range []string{"a.go", "b.txt", "docs/readme.md", "src/main.go", "src/deep/x.go"} {
+		writeAt(t, dir, f, f)
+	}
+	chdir(t, dir)
+	if err := runAdd([]string{"a.go", "b.txt", "src", "docs"}); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestRunLsFilters(t *testing.T) {
+	dir := stageLsRepo(t)
+
+	run := func(args ...string) []string {
+		t.Helper()
+		out, err := captureStdout(t, func() error { return runLs(args) })
+		if err != nil {
+			t.Fatalf("runLs(%v): %v", args, err)
+		}
+		return lsOutputPaths(out)
+	}
+
+	all := []string{"a.go", "b.txt", "docs/readme.md", "src/deep/x.go", "src/main.go"}
+	cases := []struct {
+		name string
+		args []string
+		want []string
+	}{
+		{"no args", nil, all},
+		{"exact file", []string{"a.go"}, []string{"a.go"}},
+		{"directory prefix", []string{"src"}, []string{"src/deep/x.go", "src/main.go"}},
+		{"nested directory", []string{"src/deep"}, []string{"src/deep/x.go"}},
+		{"glob one level", []string{"*.go"}, []string{"a.go"}},
+		{"globstar any depth", []string{"**/*.go"}, []string{"a.go", "src/deep/x.go", "src/main.go"}},
+		{"subtree", []string{"src/**"}, []string{"src/deep/x.go", "src/main.go"}},
+		{"absolute path", []string{filepath.Join(dir, "src", "main.go")}, []string{"src/main.go"}},
+		{"root", []string{"."}, all},
+		{"two args", []string{"a.go", "src/deep"}, []string{"a.go", "src/deep/x.go"}},
+		{"no match", []string{"nomatch"}, nil},
+		{"outside the repo", []string{filepath.Join("..", "outside")}, nil},
+	}
+	for _, tc := range cases {
+		got := run(tc.args...)
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: runLs(%v) = %v, want %v", tc.name, tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestRunLsCWDRelative(t *testing.T) {
+	dir := stageLsRepo(t)
+	chdir(t, filepath.Join(dir, "src"))
+
+	run := func(args ...string) []string {
+		t.Helper()
+		out, err := captureStdout(t, func() error { return runLs(args) })
+		if err != nil {
+			t.Fatalf("runLs(%v): %v", args, err)
+		}
+		return lsOutputPaths(out)
+	}
+
+	if got, want := run("*.go"), []string{"src/main.go"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("from src, *.go = %v, want %v", got, want)
+	}
+	if got, want := run("deep"), []string{"src/deep/x.go"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("from src, deep = %v, want %v", got, want)
+	}
+	writeAt(t, dir, "top.go", "top")
+	if err := runAdd([]string{"../top.go"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := run("../top.go"), []string{"top.go"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("from src, ../top.go = %v, want %v", got, want)
+	}
+}
+
+func TestRunLsEmptyIndex(t *testing.T) {
+	_, dir := newAddRepo(t)
+	chdir(t, dir)
+
+	out, err := captureStdout(t, func() error { return runLs(nil) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "nothing staged\n" {
+		t.Errorf("no args on an empty index printed %q, want %q", out, "nothing staged\n")
+	}
+
+	out, err = captureStdout(t, func() error { return runLs([]string{"a.go"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "" {
+		t.Errorf("args on an empty index printed %q, want nothing", out)
+	}
+}
+
+func TestRunLsShowsAllOSVariants(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "pkg/tool.txt", "tool")
+	chdir(t, dir)
+
+	full := filepath.Join(dir, "pkg", "tool.txt")
+	if err := r.AddFileOS(full, "win"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFileOS(full, "linux"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := captureStdout(t, func() error { return runLs([]string{"pkg/tool.txt"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := lsOutputPaths(out), []string{"pkg/tool.txt", "pkg/tool.txt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("literal: paths = %v, want both variants %v", got, want)
+	}
+	for _, tag := range []string{"[win]", "[linux]"} {
+		if !strings.Contains(out, tag) {
+			t.Errorf("literal: output lacks %s:\n%s", tag, out)
+		}
+	}
+	if strings.Contains(out, "[mac]") {
+		t.Errorf("literal: output has an unstaged mac variant:\n%s", out)
+	}
+
+	out, err = captureStdout(t, func() error { return runLs([]string{"pkg/*.txt"}) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := lsOutputPaths(out), []string{"pkg/tool.txt", "pkg/tool.txt"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("glob: paths = %v, want both variants %v", got, want)
+	}
+}
+
+func TestRunLsEscapedLiteralWildcard(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a wildcard is not a legal Windows filename, and \\ is a separator there")
+	}
+	_, dir := newAddRepo(t)
+	writeAt(t, dir, "star*name.txt", "star")
+	writeAt(t, dir, "starXname.txt", "x")
+	chdir(t, dir)
+
+	if err := runAdd([]string{"star*name.txt", "starXname.txt"}); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(arg string) []string {
+		t.Helper()
+		out, err := captureStdout(t, func() error { return runLs([]string{arg}) })
+		if err != nil {
+			t.Fatalf("runLs(%q): %v", arg, err)
+		}
+		return lsOutputPaths(out)
+	}
+
+	if got, want := run(`star\*name.txt`), []string{"star*name.txt"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("escaped: %v, want the literal file %v", got, want)
+	}
+	if got, want := run("star*name.txt"), []string{"star*name.txt", "starXname.txt"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("unescaped: %v, want both files %v", got, want)
 	}
 }

@@ -81,7 +81,7 @@ qin clone http://example.com/repo myrepo
 | `log [-n <num>] [--graph] [--all]` | 查看提交历史（`--graph` 分支可视化，`--all` 显示所有分支，`-n` 限制条数） |
 | `diff [--cached] [<ref> <ref>]` | 查看文件级别变更 |
 | `cat <hash>` | 打印对象内容 |
-| `ls` | 列出已暂存文件 |
+| `ls [<path>\|<glob>]...` | 列出已暂存文件；无参数时列出全部；参数按当前目录解析为文件/目录前缀或 shell 通配符，无匹配时静默 |
 | `show <file> [--os <os>]` | 查看文件的指定 OS 变体内容 |
 
 ### 分支与标签

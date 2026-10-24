@@ -51,7 +51,7 @@ func main() {
 		"log":               {"log", "Show commit history [--graph]", runLog},
 		"status":            {"status", "Show working tree status", runStatus},
 		"cat":               {"cat", "Print an object's content", runCat},
-		"ls":                {"ls", "List staged files", runLs},
+		"ls":                {"ls", "List staged files matching paths or globs", runLs},
 		"checkout":          {"checkout", "Restore files from a commit", runCheckout},
 		"switch":            {"switch", "Switch to an existing branch", runSwitch},
 		"branch":            {"branch", "List, create, or delete branches", runBranch},
@@ -107,7 +107,7 @@ Commands:
   log [--graph]     Show commit history (--graph for branch visualization)
   status            Show working tree status (alias: st)
   cat <hash>        Print an object
-  ls                List staged files
+  ls [<path>|<glob>]...  List staged files (default: all)
   checkout <ref>    Restore files from a commit (alias: co)
   switch <branch>   Switch to an existing branch
   branch [-d <name>] List, create, or delete branches
@@ -721,9 +721,75 @@ func filterList(list []string, patterns []string) []string {
 	return r
 }
 
+// matchLiteralPath is the literal half of path filtering: the path itself or
+// anything beneath it. matchAnyPath (the status/diff filters) uses only this.
+func matchLiteralPath(path, p string) bool {
+	return path == p || strings.HasPrefix(path, p+"/")
+}
+
 func matchAnyPath(path string, patterns []string) bool {
 	for _, p := range patterns {
-		if path == p || strings.HasPrefix(path, p+"/") {
+		if matchLiteralPath(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// lsFilter is one `qin ls` positional argument resolved against the
+// repository. pattern is repo-relative and slash-separated; "" is the
+// repository root and selects every entry. glob is set when the argument holds
+// an unescaped wildcard, in which case pattern keeps its escape backslashes.
+type lsFilter struct {
+	pattern string
+	glob    bool
+}
+
+// resolveLsFilter converts a CWD-relative argument to a repo-relative filter.
+// The conversion is lexical — wildcard bytes are ordinary bytes to Clean and
+// Rel — so a pattern survives it. ".." is resolved first, which means
+// src/*/../x behaves like src/x. It reports false for an argument that cannot
+// be related to the repository or that resolves outside it; such an argument
+// matches nothing.
+func resolveLsFilter(arg, cwd, repoRoot string) (lsFilter, bool) {
+	p := arg
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(cwd, p)
+	}
+	rel, err := filepath.Rel(repoRoot, p)
+	if err != nil {
+		return lsFilter{}, false
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == ".." || strings.HasPrefix(rel, "../") {
+		return lsFilter{}, false
+	}
+	// The same normalization and escape-aware classification the @file
+	// expander uses: a backslash escapes the next byte, so \* names a literal
+	// '*' and a literal backslash in a Unix filename needs \\.
+	norm, _ := normalizeGlobPattern(rel)
+	if hasMeta, _ := globSyntax(norm); hasMeta {
+		return lsFilter{pattern: norm, glob: true}, true
+	}
+	return lsFilter{pattern: unescapeGlob(norm)}, true
+}
+
+// lsFilterMatches applies one ls argument. A literal directory selects
+// everything beneath it; a glob is anchored and matches the whole path, the
+// way the shell matches one name.
+func lsFilterMatches(path string, f lsFilter) bool {
+	if f.glob {
+		return repo.MatchPathGlob(path, f.pattern)
+	}
+	if f.pattern == "" {
+		return true
+	}
+	return matchLiteralPath(path, f.pattern)
+}
+
+func lsMatchesAny(path string, filters []lsFilter) bool {
+	for _, f := range filters {
+		if lsFilterMatches(path, f) {
 			return true
 		}
 	}
@@ -1052,13 +1118,35 @@ func runLs(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Arguments filter the listing; no arguments means everything. filtering
+	// is tracked separately from filters because every argument can resolve
+	// away (an outside path), and that must still mean "no matches", not
+	// "list everything".
+	filtering := len(args) > 0
+	var filters []lsFilter
+	if filtering {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		for _, arg := range args {
+			if f, ok := resolveLsFilter(arg, cwd, r.Path); ok {
+				filters = append(filters, f)
+			}
+		}
+	}
+
 	if len(files) == 0 {
-		fmt.Println("nothing staged")
+		if !filtering {
+			fmt.Println("nothing staged")
+		}
 		return nil
 	}
 
 	// Show all files regardless of OS, sorted by path then OS variant
-	// (default first, then win/mac/linux)
+	// (default first, then win/mac/linux). The OS variant is not part of the
+	// match: every variant of a matched path is listed.
 	type lsEntry struct {
 		path  string
 		osID  uint8
@@ -1067,6 +1155,9 @@ func runLs(args []string) error {
 	entries := make([]lsEntry, 0, len(files))
 	for key, entry := range files {
 		path, osID := repo.ParseKey(key)
+		if filtering && !lsMatchesAny(path, filters) {
+			continue
+		}
 		entries = append(entries, lsEntry{path, osID, entry})
 	}
 	sort.Slice(entries, func(i, j int) bool {
