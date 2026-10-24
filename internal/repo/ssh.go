@@ -218,6 +218,7 @@ func (r *Repository) sshCollectMissing(host, repoPath string, hash core.Hash) (m
 }
 
 func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]bool, treeHash core.Hash) error {
+	defer endProgressLine()
 	if treeHash.IsZero() || set[treeHash] || sshHasObject(host, repoPath, treeHash) {
 		return nil
 	}
@@ -253,7 +254,7 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 			set[entry.Hash] = true
 		}
 		if len(set)%5000 < 10 {
-			fmt.Fprintf(os.Stderr, "scanning: %d objects...", len(set))
+			printProgress("scanning: %d objects...", len(set))
 		}
 	}
 

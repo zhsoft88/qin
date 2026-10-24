@@ -47,6 +47,7 @@ func (r *Repository) WorkTreeStatus() (*Status, error) {
 //  2. Scan: walk the working tree for untracked files, skipping unchanged
 //     directories via the on-disk untracked cache.
 func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, filterPaths ...string) (*Status, error) {
+	defer endProgressLine()
 	phase := "loading index"
 	printProgress("%s...", phase)
 	idx, err := r.LoadIndex()
@@ -386,9 +387,6 @@ func (r *Repository) WorkTreeStatusFiltered(include, exclude map[uint8]bool, fil
 	if useCache {
 		r.saveUntrackedCache(cache)
 	}
-	if checked > 0 {
-		endProgressLine()
-	}
 	sort.Strings(s.Untracked)
 	sort.Strings(s.Modified)
 	sort.Strings(s.Deleted)
@@ -483,6 +481,7 @@ func (r *Repository) trackedEntryChanged(fullPath string, entry IndexEntry, fi o
 // The index is saved once, after every path has been processed. On error no
 // entry is persisted, so a failed commit -a leaves the staging area as it was.
 func (r *Repository) StageTrackedChanges() (modified, deleted int, err error) {
+	defer endProgressLine()
 	printProgress("loading index...")
 	idx, err := r.LoadIndex()
 	if err != nil {
@@ -552,7 +551,6 @@ func (r *Repository) StageTrackedChanges() (modified, deleted int, err error) {
 			return 0, 0, err
 		}
 	}
-	endProgressLine()
 	return modified, deleted, nil
 }
 
@@ -583,8 +581,13 @@ func printProgress(format string, args ...interface{}) {
 }
 
 // endProgressLine scrolls the current progress line and resets the
-// tail-padding state for the next progress line.
+// tail-padding state for the next progress line. It does nothing when no line
+// is outstanding, so a function can defer it unconditionally and every return
+// path — an error included — leaves the cursor at the start of a fresh line.
 func endProgressLine() {
+	if lastProgressLen == 0 {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "\n")
 	lastProgressLen = 0
 }

@@ -1157,3 +1157,31 @@ func TestStatusDegradedSymlinkAndTypeChange(t *testing.T) {
 		t.Error("a regular file where a real link is expected not reported as a type change")
 	}
 }
+
+// TestEndProgressLineWithoutProgressWritesNothing pins the contract that lets
+// every function defer endProgressLine: when no line is outstanding it must not
+// emit a blank line.
+func TestEndProgressLineWithoutProgressWritesNothing(t *testing.T) {
+	old := os.Stderr
+	f, err := ioutil.TempFile("", "qin-progress-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	os.Stderr = f
+	defer func() { os.Stderr = old }()
+
+	lastProgressLen = 0
+	endProgressLine()
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ioutil.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("expected no output, got %q", data)
+	}
+}

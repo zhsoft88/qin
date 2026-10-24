@@ -35,6 +35,10 @@ func (r *Repository) SwitchBranch(name string) error {
 
 // restoreCommit restores files and updates index but does NOT touch HEAD.
 func (r *Repository) restoreCommit(hash core.Hash) error {
+	// The caller prints its own result right after this returns, so the last
+	// progress rewrite must be terminated on every path — including an error
+	// raised partway through the restore.
+	defer endProgressLine()
 	oldFiles, err := r.ListFiles()
 	if err != nil {
 		return fmt.Errorf("list current files: %w", err)

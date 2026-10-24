@@ -223,6 +223,7 @@ func (r *Repository) LfsStatus() ([]LfsFile, error) {
 // LfsPull fetches the chunk blobs for a single large file from the remote
 // and replaces the placeholder in the working tree with the real content.
 func (r *Repository) LfsPull(remoteName string, filePath string) error {
+	defer endProgressLine()
 	// The path is joined onto the working tree root below, so it must not
 	// escape. The index lookup that follows already filters to known entries,
 	// but checking the argument directly keeps this function safe on its own.
@@ -375,6 +376,7 @@ func (r *Repository) collectObjects(boundary *Repository, hash core.Hash, lazy b
 // collectTreeRec adds a tree and all its entry hashes to set.
 // For chunk manifests, also adds the referenced chunk blobs (unless lazy).
 func (r *Repository) collectTreeRec(boundary *Repository, set map[core.Hash]bool, treeHash core.Hash, lazy bool) error {
+	defer endProgressLine()
 	if treeHash.IsZero() || set[treeHash] || boundary.HasObject(treeHash) {
 		return nil
 	}
@@ -720,6 +722,7 @@ func (r *Repository) Push(remoteName string, force bool) error {
 // collectOSChunks walks the commit tree and collects chunk blob hashes
 // that are needed for the current OS but not yet present locally.
 func (r *Repository) collectOSChunks(commitHash core.Hash) (map[core.Hash]bool, error) {
+	defer endProgressLine()
 	needed := make(map[core.Hash]bool)
 	cOS := currentOS()
 
@@ -740,7 +743,7 @@ func (r *Repository) collectOSChunks(commitHash core.Hash) (map[core.Hash]bool, 
 			continue
 		}
 		if i%10000 == 0 {
-			fmt.Fprintf(os.Stderr, "  scanning tree: %d/%d entries...", i, len(tree.Entries))
+			printProgress("  scanning tree: %d/%d entries...", i, len(tree.Entries))
 		}
 		// Files below chunk threshold are never stored as chunk manifests
 		if entry.Size < chunkThreshold {

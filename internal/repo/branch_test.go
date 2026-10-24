@@ -187,3 +187,63 @@ func TestListBranches(t *testing.T) {
 		t.Fatalf("expected 2 branches, got %d", len(branches))
 	}
 }
+
+// TestSwitchBranchEndsProgressLine pins the shape of the final output: the
+// restore rewrites an in-place stderr line, and a caller prints its result
+// right after it returns ("fast-forward pull" after a pull). Leaving the line
+// unterminated made that message land on top of the progress text.
+func TestSwitchBranchEndsProgressLine(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(dir, "a.txt")
+	if err := ioutil.WriteFile(f, []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.AddFile(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.WriteCommit("Test", "commit"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CreateBranch("feature"); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stderr
+	capture, err := ioutil.TempFile("", "qin-stderr-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = capture
+	defer func() {
+		os.Stderr = old
+		capture.Close()
+		os.Remove(capture.Name())
+	}()
+	lastProgressLen = 0
+
+	if err := r.SwitchBranch("feature"); err != nil {
+		t.Fatal(err)
+	}
+	if lastProgressLen != 0 {
+		t.Errorf("progress state left open: lastProgressLen = %d", lastProgressLen)
+	}
+	if err := capture.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ioutil.ReadFile(capture.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 || data[len(data)-1] != '\n' {
+		t.Fatalf("progress line not terminated: %q", data)
+	}
+}

@@ -138,6 +138,7 @@ func (r *Repository) httpCollectMissing(baseURL string, hash core.Hash, lazy boo
 
 // httpCollectTree fetches a tree object via HTTP and collects all entry hashes.
 func (r *Repository) httpCollectTree(baseURL string, treeHash core.Hash, lazy bool) (map[core.Hash]bool, error) {
+	defer endProgressLine()
 	set := make(map[core.Hash]bool)
 	visited := make(map[core.Hash]bool)
 
