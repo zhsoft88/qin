@@ -47,7 +47,7 @@ func main() {
 		"init":              {"init", "Initialize a new repository [--bare]", runInit},
 		"add":               {"add", "Stage file(s) for commit", runAdd},
 		"rm":                {"rm", "Remove staged file(s)", runRm},
-		"commit":            {"commit", "Create a commit from staged files", runCommit},
+		"commit":            {"commit", "Create a commit from staged files [-a]", runCommit},
 		"log":               {"log", "Show commit history [--graph]", runLog},
 		"status":            {"status", "Show working tree status", runStatus},
 		"cat":               {"cat", "Print an object's content", runCat},
@@ -103,7 +103,8 @@ Commands:
                      --bare marks a push target, which protects no branch
   add <file|@file>  Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
   rm [--cached] [-r] <file>   Remove files (--cached keeps on disk)
-  commit            Create a commit from staged files
+  commit [-a]       Create a commit from staged files (-a: stage tracked
+                    modifications and deletions first; -am <msg> works too)
   log [--graph]     Show commit history (--graph for branch visualization)
   status            Show working tree status (alias: st)
   cat <hash>        Print an object
