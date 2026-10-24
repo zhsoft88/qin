@@ -23,8 +23,10 @@ func TestSaveLoadListRemoveRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Save
-	if err := r.SaveRemote("origin", "/tmp/upstream"); err != nil {
+	// Save. The path must already be absolute: SaveRemote canonicalizes local
+	// paths, and "/tmp/upstream" is not absolute on Windows.
+	upstream := filepath.Join(dir, "upstream")
+	if err := r.SaveRemote("origin", upstream); err != nil {
 		t.Fatal(err)
 	}
 
@@ -33,8 +35,8 @@ func TestSaveLoadListRemoveRemote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if url != "/tmp/upstream" {
-		t.Fatalf("expected /tmp/upstream, got %s", url)
+	if url != upstream {
+		t.Fatalf("expected %s, got %s", upstream, url)
 	}
 
 	// List
@@ -67,19 +69,21 @@ func TestSetRemoteURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SaveRemote("origin", "/tmp/old"); err != nil {
+	oldURL := filepath.Join(dir, "old")
+	newURL := filepath.Join(dir, "new")
+	if err := r.SaveRemote("origin", oldURL); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := r.SetRemoteURL("origin", "/tmp/new"); err != nil {
+	if err := r.SetRemoteURL("origin", newURL); err != nil {
 		t.Fatal(err)
 	}
 	url, err := r.LoadRemote("origin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if url != "/tmp/new" {
-		t.Fatalf("expected /tmp/new, got %s", url)
+	if url != newURL {
+		t.Fatalf("expected %s, got %s", newURL, url)
 	}
 	remotes, _ := r.ListRemotes()
 	if len(remotes) != 1 {
@@ -94,6 +98,312 @@ func TestSetRemoteURL(t *testing.T) {
 	remotes, _ = r.ListRemotes()
 	if len(remotes) != 1 {
 		t.Fatalf("expected still 1 remote, got %d", len(remotes))
+	}
+}
+
+// TestRemoteTransportPredicate pins the one rule that decides whether a stored
+// URL is a filesystem path or a network transport. A drive path has a colon but
+// no '@', so it stays local; a path containing both is still taken for scp
+// form, as it always was.
+func TestRemoteTransportPredicate(t *testing.T) {
+	cases := []struct {
+		raw       string
+		http, ssh bool
+	}{
+		{"http://example.com/repo", true, false},
+		{"https://example.com/repo", true, false},
+		{"ssh://git@host/repo", false, true},
+		{"git@host:repo", false, true},
+		{`C:\src\repo`, false, false},
+		{"/tmp/repo", false, false},
+		{`repo\maskio.qin`, false, false},
+		{"foo:bar", false, false},
+	}
+	for _, tc := range cases {
+		if got := isHTTPURL(tc.raw); got != tc.http {
+			t.Errorf("isHTTPURL(%q) = %v, want %v", tc.raw, got, tc.http)
+		}
+		if got := isSSHURL(tc.raw); got != tc.ssh {
+			t.Errorf("isSSHURL(%q) = %v, want %v", tc.raw, got, tc.ssh)
+		}
+		if got := isRemoteTransport(tc.raw); got != (tc.http || tc.ssh) {
+			t.Errorf("isRemoteTransport(%q) = %v", tc.raw, got)
+		}
+	}
+}
+
+func TestSaveRemoteCanonicalizesLocalPaths(t *testing.T) {
+	work, err := ioutil.TempDir("", "qin-canon-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(work)
+
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Defers run in reverse order, so the CWD is restored before work is
+	// removed: Windows cannot delete a directory that is the process CWD.
+	defer os.Chdir(old)
+	if err := os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := Init(filepath.Join(work, "repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rel := filepath.Join("..", "remote")
+	want, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveRemote("origin", rel); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.LoadRemote("origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("relative remote stored as %s, want %s", got, want)
+	}
+
+	abs := filepath.Join(work, "abs-remote")
+	if err := r.SaveRemote("abs", abs); err != nil {
+		t.Fatal(err)
+	}
+	got, err = r.LoadRemote("abs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != abs {
+		t.Fatalf("absolute remote stored as %s, want %s", got, abs)
+	}
+}
+
+func TestSaveRemoteLeavesTransportURLsAlone(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{
+		"http://example.com/repo",
+		"https://example.com/repo",
+		"ssh://git@host/repo",
+		"git@host:repo",
+	} {
+		if err := r.SaveRemote("origin", u); err != nil {
+			t.Fatal(err)
+		}
+		got, err := r.LoadRemote("origin")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != u {
+			t.Fatalf("transport URL stored as %q, want %q", got, u)
+		}
+	}
+}
+
+func TestSaveRemoteRejectsEmptyURL(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"", "   "} {
+		if err := r.SaveRemote("origin", u); err == nil {
+			t.Fatalf("SaveRemote accepted %q", u)
+		}
+	}
+	if _, err := r.LoadRemote("origin"); err == nil {
+		t.Fatal("an empty URL created a remote")
+	}
+}
+
+func TestOpenExactRootDoesNotWalkUp(t *testing.T) {
+	_, dir := newTargetDir(t, true)
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Control: Open is for a working directory and does walk up.
+	if _, err := Open(sub); err != nil {
+		t.Fatalf("Open should find the repository above %s: %v", sub, err)
+	}
+
+	_, err := openExactRoot(sub)
+	if err == nil {
+		t.Fatal("openExactRoot walked up to the repository")
+	}
+	if !strings.Contains(err.Error(), "not a repository") || !strings.Contains(err.Error(), sub) {
+		t.Fatalf("error %q should name the path it checked", err)
+	}
+	if r, err := openExactRoot(dir); err != nil || r.Path != dir {
+		t.Fatalf("openExactRoot at the root: path %v, err %v", r, err)
+	}
+}
+
+// TestPushStaleRelativeRemoteFailsNamingResolvedPath reproduces the report that
+// started this fix: a relative origin written before SaveRemote canonicalised
+// paths used to resolve against the process CWD, walk up into the pusher's own
+// checkout, and be reported as a non-bare target with main checked out.
+func TestPushStaleRelativeRemoteFailsNamingResolvedPath(t *testing.T) {
+	target, targetDir := newTargetDir(t, true)
+	pusher := pusherWithCommit(t, targetDir)
+
+	// Write the legacy relative value directly: SaveRemote would canonicalize it.
+	stale := filepath.Join("missing-dir", "missing-target")
+	remotesDir := filepath.Join(pusher.QinDir(), "remotes")
+	if err := os.MkdirAll(remotesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(remotesDir, "origin"), []byte(stale+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := pusher.Push("origin", false)
+	if err == nil {
+		t.Fatal("push with a stale relative remote should fail")
+	}
+	resolved := filepath.Join(pusher.Path, stale)
+	if !strings.Contains(err.Error(), "not a repository") || !strings.Contains(err.Error(), resolved) {
+		t.Fatalf("error %q should name the resolved path %s", err, resolved)
+	}
+	if strings.Contains(err.Error(), "checked out") {
+		t.Fatalf("push reported the checked-out refusal instead of the missing remote: %v", err)
+	}
+	if _, err := target.ReadRef("refs/heads/main"); err == nil {
+		t.Fatal("a failed push wrote the target's main")
+	}
+}
+
+// TestLegacyRelativeRemoteResolvesAgainstRepoRoot proves the base is r.Path,
+// not the directory the command runs from: the package CWD is not the pusher,
+// and the test also chdirs into a subdirectory.
+func TestLegacyRelativeRemoteResolvesAgainstRepoRoot(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-legacy-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	pusher, err := Init(filepath.Join(dir, "pusher"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(pusher.Path, "f.txt")
+	if err := ioutil.WriteFile(file, []byte("f"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := pusher.AddFile(file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pusher.WriteCommit("Test", "f"); err != nil {
+		t.Fatal(err)
+	}
+
+	target, err := InitBare(filepath.Join(pusher.Path, "target"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remotesDir := filepath.Join(pusher.QinDir(), "remotes")
+	if err := os.MkdirAll(remotesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(remotesDir, "origin"), []byte("target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sub := filepath.Join(pusher.Path, "sub")
+	if err := os.Mkdir(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(old)
+	if err := os.Chdir(sub); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := pusher.Push("origin", false); err != nil {
+		t.Fatalf("push to a repo-root-relative legacy remote failed: %v", err)
+	}
+	tip, err := pusher.ReadRef("refs/heads/main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := target.ReadRef("refs/heads/main")
+	if err != nil {
+		t.Fatalf("the target's main was not written: %v", err)
+	}
+	if got != tip {
+		t.Fatalf("target main = %s, want %s", got, tip)
+	}
+}
+
+// TestCloneSavesAbsoluteRemote pins that Clone addresses the same repository
+// for the whole operation when its argument is a relative path.
+func TestCloneSavesAbsoluteRemote(t *testing.T) {
+	work, err := ioutil.TempDir("", "qin-cloneabs-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(work)
+
+	source, err := Init(filepath.Join(work, "source"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(source.Path, "f.txt")
+	if err := ioutil.WriteFile(file, []byte("f"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := source.AddFile(file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.WriteCommit("Test", "f"); err != nil {
+		t.Fatal(err)
+	}
+
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(old)
+	if err := os.Chdir(work); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(work, "dest")
+	cloned, err := Clone("source", dest, false)
+	if err != nil {
+		t.Fatalf("clone from a relative path failed: %v", err)
+	}
+	want := filepath.Join(work, "source")
+	got, err := cloned.LoadRemote("origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("origin stored as %s, want %s", got, want)
 	}
 }
 

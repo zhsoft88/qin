@@ -17,10 +17,65 @@ type Remote struct {
 	URL  string
 }
 
+// ---- Remote URL forms ----
+
+// isHTTPURL reports whether raw names the HTTP transport. The scheme is
+// recognized by prefix before anything interprets it: a filesystem path may
+// contain any character, so there is nothing to parse.
+func isHTTPURL(raw string) bool {
+	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://")
+}
+
+// isSSHURL reports whether raw names the SSH transport, either explicitly
+// (ssh://) or in scp form (user@host:path). Both '@' and ':' are required: a
+// Windows drive path has a colon but no '@' ("C:\src\repo"), so a local path is
+// not mistaken for a host. A local path that happens to contain both is still
+// routed to SSH, as it always has been; this predicate centralizes that rule
+// rather than inventing a new one.
+func isSSHURL(raw string) bool {
+	return strings.HasPrefix(raw, "ssh://") ||
+		(strings.Contains(raw, "@") && strings.Contains(raw, ":"))
+}
+
+// isRemoteTransport reports whether raw is addressed to a network transport.
+// Everything else is a local path: the filesystem is the fallback because it is
+// the one transport that can name any string.
+func isRemoteTransport(raw string) bool {
+	return isHTTPURL(raw) || isSSHURL(raw)
+}
+
+// canonicalRemoteURL returns the form a remote URL is stored in. A local path
+// is made absolute while the process still is in the directory the user typed
+// it in; storing the relative spelling would make every later command resolve
+// it against a different working directory. Network URLs are not paths and are
+// returned byte-identical.
+//
+// Existence is deliberately not checked: Clone records origin before its first
+// network call precisely so a failed clone still says where it came from, and a
+// remote may be unreachable or not created yet. A target is checked when it is
+// used, by openExactRoot.
+func canonicalRemoteURL(url string) (string, error) {
+	if strings.TrimSpace(url) == "" {
+		return "", fmt.Errorf("remote URL is empty")
+	}
+	if isRemoteTransport(url) {
+		return url, nil
+	}
+	abs, err := filepath.Abs(url)
+	if err != nil {
+		return "", fmt.Errorf("resolve remote path %q: %w", url, err)
+	}
+	return abs, nil
+}
+
 // ---- Remote URL CRUD ----
 
 // SaveRemote writes a remote URL to .qin/remotes/<name>.
 func (r *Repository) SaveRemote(name, url string) error {
+	url, err := canonicalRemoteURL(url)
+	if err != nil {
+		return err
+	}
 	remotesDir := filepath.Join(r.QinDir(), "remotes")
 	if err := os.MkdirAll(remotesDir, 0755); err != nil {
 		return err
@@ -35,6 +90,28 @@ func (r *Repository) LoadRemote(name string) (string, error) {
 		return "", fmt.Errorf("remote not found: %s", name)
 	}
 	return strings.TrimSpace(string(data)), nil
+}
+
+// localRemotePath resolves a local remote URL. Relative values can only come
+// from a config written before SaveRemote canonicalised them; they are taken
+// relative to the repository root, not the process working directory. qin never
+// changes directory, so the repository a remote names is a fact about this
+// repository, not about where a command happens to run: resolving against the
+// CWD would make the same URL address different repositories.
+func (r *Repository) localRemotePath(remoteURL string) string {
+	if filepath.IsAbs(remoteURL) {
+		return remoteURL
+	}
+	return filepath.Join(r.Path, remoteURL)
+}
+
+// openLocalRemote opens the repository a local remote URL names, exactly.
+func (r *Repository) openLocalRemote(remoteURL string) (*Repository, error) {
+	remoteRepo, err := openExactRoot(r.localRemotePath(remoteURL))
+	if err != nil {
+		return nil, fmt.Errorf("open remote %s: %w", remoteURL, err)
+	}
+	return remoteRepo, nil
 }
 
 // ListRemotes returns all configured remotes.
@@ -393,9 +470,9 @@ func (r *Repository) copyObjectFromRemote(remoteURL string, hash core.Hash) erro
 	var err error
 
 	switch {
-	case strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://"):
+	case isHTTPURL(remoteURL):
 		data, err = httpReadObject(remoteURL, hash)
-	case strings.HasPrefix(remoteURL, "ssh://") || (strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":")):
+	case isSSHURL(remoteURL):
 		var host, repoPath string
 		host, repoPath, err = sshParseURL(remoteURL)
 		if err == nil {
@@ -403,7 +480,7 @@ func (r *Repository) copyObjectFromRemote(remoteURL string, hash core.Hash) erro
 		}
 	default:
 		var remoteRepo *Repository
-		remoteRepo, err = Open(remoteURL)
+		remoteRepo, err = r.openLocalRemote(remoteURL)
 		if err == nil {
 			data, err = ioutil.ReadFile(remoteRepo.objectPath(hash))
 		}
@@ -452,10 +529,10 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 		return fmt.Errorf("remote not found: %s", remoteName)
 	}
 
-	if strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://") {
+	if isHTTPURL(remoteURL) {
 		return r.fetchHTTP(remoteURL, remoteName, lazy)
 	}
-	if strings.HasPrefix(remoteURL, "ssh://") || strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":") {
+	if isSSHURL(remoteURL) {
 		host, repoPath, err := sshParseURL(remoteURL)
 		if err != nil {
 			return err
@@ -464,9 +541,9 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 	}
 
 	// Local path
-	remoteRepo, err := Open(remoteURL)
+	remoteRepo, err := r.openLocalRemote(remoteURL)
 	if err != nil {
-		return fmt.Errorf("open remote %s: %w", remoteURL, err)
+		return err
 	}
 
 	branches, _, err := remoteRepo.ListBranches()
@@ -531,10 +608,10 @@ func (r *Repository) Push(remoteName string, force bool) error {
 		return fmt.Errorf("remote not found: %s", remoteName)
 	}
 
-	if strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://") {
+	if isHTTPURL(remoteURL) {
 		return r.pushHTTP(remoteURL, remoteName, force)
 	}
-	if strings.HasPrefix(remoteURL, "ssh://") || strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":") {
+	if isSSHURL(remoteURL) {
 		host, repoPath, err := sshParseURL(remoteURL)
 		if err != nil {
 			return err
@@ -543,9 +620,9 @@ func (r *Repository) Push(remoteName string, force bool) error {
 	}
 
 	// Local path
-	remoteRepo, err := Open(remoteURL)
+	remoteRepo, err := r.openLocalRemote(remoteURL)
 	if err != nil {
-		return fmt.Errorf("open remote %s: %w", remoteURL, err)
+		return err
 	}
 
 	branches, _, err := r.ListBranches()
@@ -758,13 +835,20 @@ func Clone(url, dir string, lazy bool) (*Repository, error) {
 	if err := r.SaveRemote("origin", url); err != nil {
 		return nil, err
 	}
+	// Use what was stored, not the argument: SaveRemote resolved a relative
+	// local path against the invocation directory, and the rest of Clone must
+	// address the same repository.
+	remoteURL, err := r.LoadRemote("origin")
+	if err != nil {
+		return nil, err
+	}
 
 	if err := r.fetch("origin", lazy); err != nil {
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
 
 	// Determine the default branch from the remote's HEAD
-	headRef, err := remoteRef(url, "HEAD")
+	headRef, err := r.remoteRef(remoteURL, "HEAD")
 	if err != nil {
 		headRef = "ref: refs/heads/main"
 	}
@@ -782,7 +866,7 @@ func Clone(url, dir string, lazy bool) (*Repository, error) {
 	hashStr, err := r.ReadRef(trackingRef)
 	if err != nil {
 		// Fall back to any available remote-tracking ref
-		branches, _ := r.remoteBranches(url, "origin")
+		branches, _ := r.remoteBranches(remoteURL, "origin")
 		if len(branches) > 0 {
 			branchName = branches[0]
 			trackingRef = "refs/remotes/origin/" + branchName
@@ -924,8 +1008,8 @@ func (r *Repository) checkPushRef(st remoteState, ref, localTip string, force bo
 }
 
 // remoteRef reads a ref from a remote URL (supports local path, HTTP, SSH).
-func remoteRef(remoteURL, ref string) (string, error) {
-	if strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://") {
+func (r *Repository) remoteRef(remoteURL, ref string) (string, error) {
+	if isHTTPURL(remoteURL) {
 		refs, err := httpListRefs(remoteURL)
 		if err != nil {
 			return "", err
@@ -935,7 +1019,7 @@ func remoteRef(remoteURL, ref string) (string, error) {
 		}
 		return "", fmt.Errorf("ref not found: %s", ref)
 	}
-	if strings.HasPrefix(remoteURL, "ssh://") || (strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":")) {
+	if isSSHURL(remoteURL) {
 		host, repoPath, err := sshParseURL(remoteURL)
 		if err != nil {
 			return "", err
@@ -943,11 +1027,11 @@ func remoteRef(remoteURL, ref string) (string, error) {
 		return sshReadRef(host, repoPath, ref)
 	}
 	// Local path
-	r, err := Open(remoteURL)
+	remoteRepo, err := r.openLocalRemote(remoteURL)
 	if err != nil {
 		return "", err
 	}
-	return r.ReadRef(ref)
+	return remoteRepo.ReadRef(ref)
 }
 
 // remoteBranches lists branch names from a remote URL (supports local path, HTTP, SSH).
@@ -972,14 +1056,14 @@ func branchNamesFromRefs(refs map[string]string) []string {
 }
 
 func (r *Repository) remoteBranches(remoteURL, remoteName string) ([]string, error) {
-	if strings.HasPrefix(remoteURL, "http://") || strings.HasPrefix(remoteURL, "https://") {
+	if isHTTPURL(remoteURL) {
 		refs, err := httpListRefs(remoteURL)
 		if err != nil {
 			return nil, err
 		}
 		return branchNamesFromRefs(refs), nil
 	}
-	if strings.HasPrefix(remoteURL, "ssh://") || (strings.Contains(remoteURL, "@") && strings.Contains(remoteURL, ":")) {
+	if isSSHURL(remoteURL) {
 		host, repoPath, err := sshParseURL(remoteURL)
 		if err != nil {
 			return nil, err
@@ -991,7 +1075,7 @@ func (r *Repository) remoteBranches(remoteURL, remoteName string) ([]string, err
 		return branchNamesFromRefs(refs), nil
 	}
 	// Local path — open remote repo and list its branches
-	remoteRepo, err := Open(remoteURL)
+	remoteRepo, err := r.openLocalRemote(remoteURL)
 	if err != nil {
 		return nil, err
 	}

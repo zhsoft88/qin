@@ -1513,7 +1513,13 @@ func runRemote(args []string) error {
 		if err := r.SaveRemote(args[1], args[2]); err != nil {
 			return err
 		}
-		fmt.Printf("added remote: %s -> %s\n", args[1], args[2])
+		// A local path is stored absolute, so report what was stored rather
+		// than echoing a relative argument that no longer describes the remote.
+		stored, err := r.LoadRemote(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("added remote: %s -> %s\n", args[1], stored)
 	case "remove":
 		if len(args) < 2 {
 			return fmt.Errorf("usage: " + core.Name + " remote remove <name>")
@@ -1529,7 +1535,11 @@ func runRemote(args []string) error {
 		if err := r.SetRemoteURL(args[1], args[2]); err != nil {
 			return err
 		}
-		fmt.Printf("set remote url: %s -> %s\n", args[1], args[2])
+		stored, err := r.LoadRemote(args[1])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("set remote url: %s -> %s\n", args[1], stored)
 	case "list":
 		remotes, err := r.ListRemotes()
 		if err != nil {

@@ -97,11 +97,7 @@ func Open(path string) (*Repository, error) {
 	for {
 		qinDir := filepath.Join(dir, QinDir)
 		if info, err := os.Stat(qinDir); err == nil && info.IsDir() {
-			cfg, err := LoadConfig(dir)
-			if err != nil {
-				return nil, err
-			}
-			return &Repository{Path: dir, Config: cfg}, nil
+			return repoAt(dir)
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -109,6 +105,36 @@ func Open(path string) (*Repository, error) {
 		}
 		dir = parent
 	}
+}
+
+// openExactRoot opens the repository whose metadata is exactly path/.qin and
+// never searches parent directories. Open's upward walk answers "which
+// repository contains this working directory"; a remote URL answers a
+// different question — it names one repository. Searching upward from a stale
+// or mistyped remote path can land on an ancestor, and when the command runs
+// inside a checkout that ancestor is the checkout itself: a push then treats
+// the pusher as its own target and reports it as a non-bare repository with a
+// branch checked out, instead of naming the path that does not exist.
+func openExactRoot(path string) (*Repository, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path: %w", err)
+	}
+	qinDir := filepath.Join(absPath, QinDir)
+	if info, err := os.Stat(qinDir); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("not a repository at %s (no %s directory)", absPath, QinDir)
+	}
+	return repoAt(absPath)
+}
+
+// repoAt builds the Repository rooted at dir, whose .qin has already been
+// confirmed to exist.
+func repoAt(dir string) (*Repository, error) {
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		return nil, err
+	}
+	return &Repository{Path: dir, Config: cfg}, nil
 }
 
 func (r *Repository) QinDir() string {

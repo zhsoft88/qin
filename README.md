@@ -112,6 +112,16 @@ qin clone http://example.com/repo myrepo
 
 `qin clone` 会自动把克隆来源记录为 `origin`：之后可用 `qin remote list` 查看从哪里克隆、`qin remote set-url origin <url>` 修改或 `qin remote remove origin` 删除。
 
+**本地远程路径。** `clone`、`remote add`、`remote set-url` 收到本地路径时，会按执行命令时的工作目录把它转成绝对路径再保存，所以之后从任意子目录执行 `push` / `fetch` / `pull` 都指向同一个仓库；`remote list` 显示的是绝对路径。HTTP/HTTPS/SSH URL 按原样保存，不做转换。
+
+早期版本写下的相对路径仍按**仓库根目录**解析（而不是当前目录）。远程目标必须正好是仓库根，qin 不会从目标路径向上查找 `.qin`；路径不对时会报出实际检查的绝对路径，而不会误把当前仓库或它的祖先当成目标：
+
+```
+error: push: open remote sibling/repo: not a repository at /work/app/sibling/repo (no .qin directory)
+```
+
+用 `qin remote set-url origin <绝对路径>` 改正即可。
+
 **非快进保护。** 目标分支上有本地历史里没有的提交时，`push` 会在传输任何对象之前整体拒绝，以免对方那些提交被顶成孤儿：
 
 ```
