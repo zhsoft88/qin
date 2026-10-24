@@ -56,6 +56,47 @@ func TestSaveLoadListRemoveRemote(t *testing.T) {
 	}
 }
 
+func TestSetRemoteURL(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SaveRemote("origin", "/tmp/old"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.SetRemoteURL("origin", "/tmp/new"); err != nil {
+		t.Fatal(err)
+	}
+	url, err := r.LoadRemote("origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if url != "/tmp/new" {
+		t.Fatalf("expected /tmp/new, got %s", url)
+	}
+	remotes, _ := r.ListRemotes()
+	if len(remotes) != 1 {
+		t.Fatalf("expected 1 remote, got %d", len(remotes))
+	}
+
+	// A typo must not create a new remote.
+	err = r.SetRemoteURL("orign", "/tmp/typo")
+	if err == nil || !strings.Contains(err.Error(), "remote not found") {
+		t.Fatalf("expected remote not found, got %v", err)
+	}
+	remotes, _ = r.ListRemotes()
+	if len(remotes) != 1 {
+		t.Fatalf("expected still 1 remote, got %d", len(remotes))
+	}
+}
+
 func TestFetchFirstTime(t *testing.T) {
 	remoteDir, err := ioutil.TempDir("", "qin-remote-*")
 	if err != nil {

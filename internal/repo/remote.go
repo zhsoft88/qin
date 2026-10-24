@@ -74,6 +74,15 @@ func (r *Repository) RemoveRemote(name string) error {
 	return os.Remove(filepath.Join(r.QinDir(), "remotes", name))
 }
 
+// SetRemoteURL updates an existing remote's URL. Unlike SaveRemote it refuses
+// an unknown name, so a typo cannot silently create a new remote.
+func (r *Repository) SetRemoteURL(name, url string) error {
+	if _, err := r.LoadRemote(name); err != nil {
+		return err
+	}
+	return r.SaveRemote(name, url)
+}
+
 // ---- LFS / lazy large file support ----
 
 // LfsFile describes the status of a large file in the working tree.

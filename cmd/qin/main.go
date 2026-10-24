@@ -117,7 +117,8 @@ Commands:
   rebase <branch>    Rebase current branch onto another branch
   cherry-pick <ref>  Apply changes from an existing commit
   stash [pop|list]   Stash or pop working tree changes
-  remote [add <name> <path>|remove <name>|list]  Manage remotes
+  remote [add <name> <path>|remove <name>|set-url <name> <url>|list]
+                     Manage remotes
   push [--force] [<remote>]
                      Push to remote (default: origin); refuses a
                      non-fast-forward update unless --force is given
@@ -1521,6 +1522,14 @@ func runRemote(args []string) error {
 			return err
 		}
 		fmt.Printf("removed remote: %s\n", args[1])
+	case "set-url":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: " + core.Name + " remote set-url <name> <url>")
+		}
+		if err := r.SetRemoteURL(args[1], args[2]); err != nil {
+			return err
+		}
+		fmt.Printf("set remote url: %s -> %s\n", args[1], args[2])
 	case "list":
 		remotes, err := r.ListRemotes()
 		if err != nil {
@@ -1530,7 +1539,7 @@ func runRemote(args []string) error {
 			fmt.Printf("%s\t%s\n", rm.Name, rm.URL)
 		}
 	default:
-		return fmt.Errorf("unknown remote subcommand: %s (use add, remove, list)", args[0])
+		return fmt.Errorf("unknown remote subcommand: %s (use add, remove, set-url, list)", args[0])
 	}
 	return nil
 }
