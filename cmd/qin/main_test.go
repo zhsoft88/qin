@@ -1040,3 +1040,184 @@ func TestExpandCommitAll(t *testing.T) {
 		}
 	}
 }
+
+// ---- rm ----
+
+func commitForRm(t *testing.T, r *repo.Repository) {
+	t.Helper()
+	if _, err := r.WriteCommit("test", "init"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func indexedForRm(t *testing.T, r *repo.Repository, name string) bool {
+	t.Helper()
+	idx, err := r.LoadIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ok := idx.Entries[name]
+	return ok
+}
+
+func TestRunRmRejectsBadOptions(t *testing.T) {
+	cases := [][]string{
+		nil,
+		{"-x", "f"},
+		{"--bogus", "f"},
+		{"-rc", "f"},
+	}
+	for _, args := range cases {
+		err := runRm(args)
+		if err == nil || !strings.Contains(err.Error(), "usage:") {
+			t.Errorf("runRm(%q) = %v, want usage error", args, err)
+		}
+	}
+}
+
+func TestRunRmCombinedFlags(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "dir/a.txt", "a")
+	writeAt(t, dir, "dir/untracked.txt", "u")
+	if err := r.AddFile(filepath.Join(dir, "dir", "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	commitForRm(t, r)
+	chdir(t, dir)
+
+	out, err := captureStdout(t, func() error {
+		return runRm([]string{"-rf", "dir"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "  removed: dir/a.txt\n" {
+		t.Fatalf("stdout = %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dir", "untracked.txt")); err != nil {
+		t.Fatalf("untracked file was removed: %v", err)
+	}
+	if indexedForRm(t, r, "dir/a.txt") {
+		t.Fatal("index entry survived")
+	}
+}
+
+func TestRunRmDoubleDash(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "-f", "dash")
+	if err := r.AddFile(filepath.Join(dir, "-f")); err != nil {
+		t.Fatal(err)
+	}
+	commitForRm(t, r)
+	chdir(t, dir)
+
+	out, err := captureStdout(t, func() error {
+		return runRm([]string{"--", "-f"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "  removed: -f\n" {
+		t.Fatalf("stdout = %q", out)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "-f")); !os.IsNotExist(err) {
+		t.Fatalf("file named -f survived: %v", err)
+	}
+
+	err = runRm([]string{"--", "--bogus"})
+	if err == nil || !strings.Contains(err.Error(), "pathspec") ||
+		strings.Contains(err.Error(), "unknown option") {
+		t.Fatalf("after --, --bogus must be a pathspec: %v", err)
+	}
+}
+
+func TestRunRmCachedOutput(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "f.txt", "content")
+	if err := r.AddFile(filepath.Join(dir, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
+	commitForRm(t, r)
+	chdir(t, dir)
+
+	out, err := captureStdout(t, func() error {
+		return runRm([]string{"--cached", "f.txt"})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "  removed from index: f.txt\n" {
+		t.Fatalf("stdout = %q", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "f.txt")); err != nil {
+		t.Fatalf("--cached removed the file: %v", err)
+	}
+	if indexedForRm(t, r, "f.txt") {
+		t.Fatal("index entry survived --cached")
+	}
+}
+
+func TestRunRmRefusalReturnsError(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "f.txt", "one")
+	if err := r.AddFile(filepath.Join(dir, "f.txt")); err != nil {
+		t.Fatal(err)
+	}
+	commitForRm(t, r)
+	writeAt(t, dir, "f.txt", "changed")
+	chdir(t, dir)
+
+	err := runRm([]string{"f.txt"})
+	if err == nil || !strings.Contains(err.Error(), "local modifications") {
+		t.Fatalf("expected a refusal, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "f.txt")); statErr != nil {
+		t.Fatalf("refusal removed the file: %v", statErr)
+	}
+	if !indexedForRm(t, r, "f.txt") {
+		t.Fatal("refusal modified the index")
+	}
+}
+
+func TestRunRmFromSubdirectory(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "sub/f.txt", "f")
+	if err := r.AddFile(filepath.Join(dir, "sub", "f.txt")); err != nil {
+		t.Fatal(err)
+	}
+	commitForRm(t, r)
+	chdir(t, filepath.Join(dir, "sub"))
+
+	if _, err := captureStdout(t, func() error {
+		return runRm([]string{"f.txt"})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if indexedForRm(t, r, "sub/f.txt") {
+		t.Fatal("index entry survived")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "sub", "f.txt")); !os.IsNotExist(err) {
+		t.Fatalf("worktree file survived: %v", err)
+	}
+}
+
+func TestRunRmAllOrNothing(t *testing.T) {
+	r, dir := newAddRepo(t)
+	writeAt(t, dir, "a.txt", "a")
+	if err := r.AddFile(filepath.Join(dir, "a.txt")); err != nil {
+		t.Fatal(err)
+	}
+	commitForRm(t, r)
+	chdir(t, dir)
+
+	err := runRm([]string{"a.txt", "missing.txt"})
+	if err == nil || !strings.Contains(err.Error(), "did not match any tracked files") {
+		t.Fatalf("expected a pathspec error, got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "a.txt")); statErr != nil {
+		t.Fatalf("valid pathspec was applied: %v", statErr)
+	}
+	if !indexedForRm(t, r, "a.txt") {
+		t.Fatal("index changed despite the error")
+	}
+}

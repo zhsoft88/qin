@@ -46,7 +46,7 @@ func main() {
 	cmds := map[string]command{
 		"init":              {"init", "Initialize a new repository [--bare]", runInit},
 		"add":               {"add", "Stage file(s) for commit", runAdd},
-		"rm":                {"rm", "Remove staged file(s)", runRm},
+		"rm":                {"rm", "Remove tracked files", runRm},
 		"commit":            {"commit", "Create a commit from staged files [-a]", runCommit},
 		"log":               {"log", "Show commit history [--graph]", runLog},
 		"status":            {"status", "Show working tree status", runStatus},
@@ -102,7 +102,9 @@ Commands:
                      Initialize a new repository (default: current dir);
                      --bare marks a push target, which protects no branch
   add <file|@file>  Stage file(s) [--os | --os-match <expr>] [--exclude <glob> | --exclude @file]
-  rm [--cached] [-r] <file>   Remove files (--cached keeps on disk)
+  rm [--cached] [-r] [-f] <file>...
+                    Remove tracked files (-r: directories; -f: force;
+                    --cached: keep on disk)
   commit [-a]       Create a commit from staged files (-a: stage tracked
                     modifications and deletions first; -am <msg> works too)
   log [--graph]     Show commit history (--graph for branch visualization)
@@ -807,88 +809,75 @@ func clearLine() {
 }
 
 // ---- rm ----
-func runRm(args []string) error {
-	cached := false
-	recursive := false
+func rmUsage() string {
+	return "usage: " + core.Name + " rm [--cached] [-r] [-f] <file> [file...]"
+}
+
+// parseRmArgs accepts git-style short flag bundles (-rf, -fr) and -- as the
+// end-of-options marker. Anything else beginning with "-" is an error rather
+// than a filename, so a typo cannot silently turn into a pathspec; a literal
+// file named "-f" is reachable as `rm -- -f`.
+func parseRmArgs(args []string) (repo.RemoveOptions, []string, error) {
+	var opts repo.RemoveOptions
 	var files []string
-	for _, a := range args {
-		if a == "--cached" {
-			cached = true
-		} else if a == "-r" {
-			recursive = true
-		} else {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			files = append(files, args[i+1:]...)
+			break
+		}
+		if a == "-" || !strings.HasPrefix(a, "-") {
 			files = append(files, a)
+			continue
+		}
+		if strings.HasPrefix(a, "--") {
+			switch a {
+			case "--cached":
+				opts.Cached = true
+			case "--recursive":
+				opts.Recursive = true
+			case "--force":
+				opts.Force = true
+			default:
+				return opts, nil, fmt.Errorf("unknown option: %s\n%s", a, rmUsage())
+			}
+			continue
+		}
+		for _, c := range a[1:] {
+			switch c {
+			case 'r':
+				opts.Recursive = true
+			case 'f':
+				opts.Force = true
+			default:
+				return opts, nil, fmt.Errorf("unknown option: -%c\n%s", c, rmUsage())
+			}
 		}
 	}
+	return opts, files, nil
+}
+
+func runRm(args []string) error {
+	opts, files, err := parseRmArgs(args)
+	if err != nil {
+		return err
+	}
 	if len(files) == 0 {
-		return fmt.Errorf("usage: " + core.Name + " rm [--cached] [-r] <file> [file...]")
+		return fmt.Errorf("%s", rmUsage())
 	}
 	r, err := findRepo()
 	if err != nil {
 		return err
 	}
-	if recursive {
-		idx, err := r.LoadIndex()
-		if err != nil {
-			return err
-		}
-		for _, f := range files {
-			abs, _ := filepath.Abs(f)
-			rel, _ := filepath.Rel(r.Path, abs)
-			relFormatted := filepath.ToSlash(rel)
-			for key := range idx.Entries {
-				path, _ := repo.ParseKey(key)
-				if path == relFormatted || strings.HasPrefix(path, relFormatted+"/") {
-					delete(idx.Entries, key)
-				}
-			}
-			if !cached {
-				os.RemoveAll(filepath.Join(r.Path, relFormatted))
-			}
-			fmt.Printf("  removed: %s\n", f)
-		}
-		return r.SaveIndex(idx)
+	results, err := r.RemovePaths(files, opts)
+	if err != nil {
+		return err
 	}
-	for _, f := range files {
-		// Auto-detect directories — remove recursively
-		if fi, err := os.Stat(f); err == nil && fi.IsDir() {
-			abs, _ := filepath.Abs(f)
-			rel, _ := filepath.Rel(r.Path, abs)
-			relFormatted := filepath.ToSlash(rel)
-			idx, err := r.LoadIndex()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
-				continue
-			}
-			for key := range idx.Entries {
-				path, _ := repo.ParseKey(key)
-				if path == relFormatted || strings.HasPrefix(path, relFormatted+"/") {
-					delete(idx.Entries, key)
-				}
-			}
-			if !cached {
-				os.RemoveAll(filepath.Join(r.Path, relFormatted))
-			}
-			if err := r.SaveIndex(idx); err != nil {
-				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
-				continue
-			}
-			fmt.Printf("  removed: %s\n", f)
-			continue
-		}
-		if cached {
-			if err := r.RemoveFile(f); err != nil {
-				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
-				continue
-			}
-			fmt.Printf("  removed from index: %s\n", f)
+	for _, res := range results {
+		if res.WorkTreeRemoved {
+			fmt.Printf("  removed: %s\n", res.Name)
 		} else {
-			if err := r.RemoveFile(f); err != nil {
-				fmt.Fprintf(os.Stderr, "  rm %s: %v\n", f, err)
-				continue
-			}
-			os.Remove(filepath.Join(r.Path, f))
-			fmt.Printf("  removed: %s\n", f)
+			fmt.Printf("  removed from index: %s\n", res.Name)
 		}
 	}
 	return nil
