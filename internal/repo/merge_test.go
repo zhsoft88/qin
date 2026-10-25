@@ -260,9 +260,12 @@ func TestAlreadyUpToDate(t *testing.T) {
 	repo.AddFile(filepath.Join(dir, "f.txt"))
 	repo.WriteCommit("Test", "A")
 
-	_, err = repo.Merge("main")
-	if err == nil || err.Error() != "already up to date" {
-		t.Fatalf("expected 'already up to date', got %v", err)
+	result, err := repo.Merge("main")
+	if err != nil {
+		t.Fatalf("merging the current branch is a no-op, not an error: %v", err)
+	}
+	if result.FastForward || result.Merged {
+		t.Fatalf("expected a no-op result, got %+v", result)
 	}
 }
 

@@ -683,6 +683,16 @@ func TestPullFastForward(t *testing.T) {
 	if headStr != hB.String() {
 		t.Fatal("HEAD should point to B after fast-forward pull")
 	}
+
+	// Pulling again finds nothing to do. That is success: an up-to-date pull
+	// must not print an error and exit non-zero.
+	result, err = local.Pull("origin")
+	if err != nil {
+		t.Fatalf("second pull: %v", err)
+	}
+	if result.FastForward || result.Merged {
+		t.Fatalf("second pull reported work: %+v", result)
+	}
 }
 
 func TestPullThreeWay(t *testing.T) {

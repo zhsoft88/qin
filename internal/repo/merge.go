@@ -141,11 +141,14 @@ func (r *Repository) mergeCommit(target core.Hash, label string) (*MergeResult, 
 	}
 
 	if base == target {
+		// Nothing to do is not a failure. Merge and pull both report it as
+		// success, the way git does; a caller that needs to say so reads the
+		// zero result rather than an error.
 		return &MergeResult{
 			FastForward: false,
 			Merged:      false,
 			Conflicts:   nil,
-		}, fmt.Errorf("already up to date")
+		}, nil
 	}
 
 	if base == head {

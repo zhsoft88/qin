@@ -1433,8 +1433,10 @@ func runMerge(args []string) error {
 	}
 	if result.FastForward {
 		fmt.Println("fast-forward merge")
-	} else {
+	} else if result.Merged {
 		fmt.Println("merged")
+	} else {
+		fmt.Println("already up to date")
 	}
 	if result.Diff != nil {
 		fmt.Print(result.Diff.Render())
@@ -1647,8 +1649,10 @@ func runPull(args []string) error {
 	}
 	if result.FastForward {
 		fmt.Println("fast-forward pull")
-	} else {
+	} else if result.Merged {
 		fmt.Println("pulled and merged")
+	} else {
+		fmt.Println("already up to date")
 	}
 	return nil
 }
