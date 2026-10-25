@@ -1202,3 +1202,60 @@ func TestEndProgressLineWithoutProgressWritesNothing(t *testing.T) {
 		t.Fatalf("expected no output, got %q", data)
 	}
 }
+
+// TestStageEndsProgressLine pins what every transfer relies on: a stage line
+// starts on its own line even when an in-place progress line is open, and an
+// empty message still names the stage.
+func TestStageEndsProgressLine(t *testing.T) {
+	old := os.Stderr
+	f, err := ioutil.TempFile("", "qin-stage-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	os.Stderr = f
+	defer func() { os.Stderr = old }()
+
+	maxProgressLen = 0 // reset shared state
+
+	printProgress("[download] 1.0 MiB/2.0 MiB")
+	stage("install", "%d objects", 3)
+	stage("merge", "")
+	endProgressLine() // nothing outstanding: must write nothing
+
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ioutil.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "\r[download] 1.0 MiB/2.0 MiB\r\n[install] 3 objects\n[merge]\n"
+	if string(data) != want {
+		t.Fatalf("stage output = %q, want %q", string(data), want)
+	}
+	if maxProgressLen != 0 {
+		t.Fatalf("stage left the progress width at %d", maxProgressLen)
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 B"},
+		{1023, "1023 B"},
+		{1024, "1.0 KiB"},
+		{1536, "1.5 KiB"},
+		{1 << 20, "1.0 MiB"},
+		{1 << 30, "1.0 GiB"},
+		{1 << 40, "1.0 TiB"},
+	}
+	for _, tc := range cases {
+		if got := formatBytes(tc.n); got != tc.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}
