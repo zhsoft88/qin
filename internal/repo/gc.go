@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/zhsoft88/qin/internal/core"
 )
@@ -67,7 +68,7 @@ func (r *Repository) markReachableRefsFull(reachable map[core.Hash]bool) error {
 		if err != nil {
 			return nil
 		}
-		if fi.IsDir() {
+		if fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
 			return nil
 		}
 		data, err := ioutil.ReadFile(path)
@@ -119,7 +120,7 @@ func (r *Repository) markReachableObject(hash core.Hash, reachable map[core.Hash
 			}
 			r.markReachableObject(entry.Hash, reachable)
 		}
-	// ObjectBlob and ObjectChunkManifest are leaf nodes
+		// ObjectBlob and ObjectChunkManifest are leaf nodes
 	}
 }
 
@@ -145,7 +146,7 @@ func (r *Repository) enumerateAllObjects() ([]core.Hash, error) {
 			continue
 		}
 		for _, f := range files {
-			if f.IsDir() {
+			if f.IsDir() || strings.HasPrefix(f.Name(), ".") {
 				continue
 			}
 			fullHex := dirEntry.Name() + f.Name()

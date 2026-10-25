@@ -581,6 +581,34 @@ func printProgress(format string, args ...interface{}) {
 	}
 }
 
+// stage ends any in-place progress line and writes one bracketed stage line to
+// stderr. Stage lines describe what a transfer is doing; the final result of
+// the command still goes to stdout.
+func stage(name, format string, args ...interface{}) {
+	endProgressLine()
+	msg := fmt.Sprintf(format, args...)
+	if msg == "" {
+		fmt.Fprintf(os.Stderr, "[%s]\n", name)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[%s] %s\n", name, msg)
+}
+
+// formatBytes renders a byte count with a binary unit and one decimal place.
+func formatBytes(n int64) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	value := float64(n) / 1024
+	i := 0
+	for value >= 1024 && i < len(units)-1 {
+		value /= 1024
+		i++
+	}
+	return fmt.Sprintf("%.1f %s", value, units[i])
+}
+
 // endProgressLine scrolls the current progress line and resets the width for
 // the next progress line. It does nothing when no line is outstanding, so a
 // function can defer it unconditionally and every return path — an error

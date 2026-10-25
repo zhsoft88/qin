@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"bytes"
+	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -615,15 +617,15 @@ func TestHTTPPushForceRewind(t *testing.T) {
 	}
 }
 
-// putRef issues a raw ref PUT, the request a client that never learned the
-// rules would send.
-func putRef(t *testing.T, baseURL, path, body string) (*http.Response, string) {
+// postRefs issues a raw batch ref update, the request a client that never
+// learned the rules would send.
+func postRefs(t *testing.T, baseURL string, updates map[string]string, force bool) (*http.Response, string) {
 	t.Helper()
-	req, err := http.NewRequest("PUT", baseURL+"/"+path, strings.NewReader(body))
+	body, err := json.Marshal(map[string]interface{}{"updates": updates, "force": force})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.Post(baseURL+"/refs", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,10 +637,10 @@ func putRef(t *testing.T, baseURL, path, body string) (*http.Response, string) {
 	return resp, strings.TrimSpace(string(data))
 }
 
-// TestServeRefPutRefusesNonFastForward checks the server's own gate: a hand
-// written PUT has no client-side preflight behind it, and objects are always
+// TestServeRefsPostRefusesNonFastForward checks the server's own gate: a hand
+// written POST has no client-side preflight behind it, and objects are always
 // uploaded before refs, so by the time this runs the target can decide.
-func TestServeRefPutRefusesNonFastForward(t *testing.T) {
+func TestServeRefsPostRefusesNonFastForward(t *testing.T) {
 	dir, err := ioutil.TempDir("", "qin-serve-put-*")
 	if err != nil {
 		t.Fatal(err)
@@ -670,37 +672,81 @@ func TestServeRefPutRefusesNonFastForward(t *testing.T) {
 	defer server.Close()
 
 	// Rewinding main to A drops B: not a fast-forward.
-	resp, body := putRef(t, server.URL, "ref/refs/heads/main", hA.String())
+	resp, body := postRefs(t, server.URL, map[string]string{"refs/heads/main": hA.String()}, false)
 	if resp.StatusCode != 409 {
-		t.Fatalf("rewind PUT: status %d, want 409 (body %q)", resp.StatusCode, body)
+		t.Fatalf("rewind POST: status %d, want 409 (body %q)", resp.StatusCode, body)
 	}
 	if got := pushTipOf(t, r); got != hB.String() {
-		t.Fatalf("a refused PUT changed main to %s", got)
+		t.Fatalf("a refused POST changed main to %s", got)
 	}
 
 	// The explicit force signal is what makes the overwrite intentional.
-	resp, body = putRef(t, server.URL, "ref/refs/heads/main?force=1", hA.String())
+	resp, body = postRefs(t, server.URL, map[string]string{"refs/heads/main": hA.String()}, true)
 	if resp.StatusCode != 200 {
-		t.Fatalf("forced PUT: status %d, want 200 (body %q)", resp.StatusCode, body)
+		t.Fatalf("forced POST: status %d, want 200 (body %q)", resp.StatusCode, body)
 	}
 	if got := pushTipOf(t, r); got != hA.String() {
-		t.Fatalf("main = %s, want %s after the forced PUT", got, hA.Short())
+		t.Fatalf("main = %s, want %s after the forced POST", got, hA.Short())
 	}
 
 	// And forward again is a fast-forward, so no force is needed.
-	resp, body = putRef(t, server.URL, "ref/refs/heads/main", hB.String())
+	resp, body = postRefs(t, server.URL, map[string]string{"refs/heads/main": hB.String()}, false)
 	if resp.StatusCode != 200 {
-		t.Fatalf("fast-forward PUT: status %d, want 200 (body %q)", resp.StatusCode, body)
+		t.Fatalf("fast-forward POST: status %d, want 200 (body %q)", resp.StatusCode, body)
 	}
 	if got := pushTipOf(t, r); got != hB.String() {
 		t.Fatalf("main = %s, want %s", got, hB.Short())
 	}
 }
 
-// TestServeRefPutRejectsUnsafeRefName covers the hole a raw PUT would otherwise
-// open: the ref path is joined onto .qin, so "refs/../../evil" would write a
-// file outside the repository.
-func TestServeRefPutRejectsUnsafeRefName(t *testing.T) {
+// TestServeRefsPostIsAllOrNothing pins the batch rule: the refs are decided as
+// a set, so one refusal leaves every ref, including the acceptable ones,
+// untouched.
+func TestServeRefsPostIsAllOrNothing(t *testing.T) {
+	dir, err := ioutil.TempDir("", "qin-serve-batch-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	r, err := InitBare(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) core.Hash {
+		t.Helper()
+		h, err := r.StoreObject(core.ObjectBlob, []byte(content))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	hOld := write("old", "old")
+	hNew := write("new", "new")
+	if err := r.WriteRef("refs/heads/main", hOld.String()); err != nil {
+		t.Fatal(err)
+	}
+
+	server := startRepoServer(t, dir)
+	defer server.Close()
+
+	resp, body := postRefs(t, server.URL, map[string]string{
+		"refs/heads/topic": hNew.String(), // acceptable on its own
+		"refs/heads/main":  hOld.String(), // no-op, acceptable
+		"refs/heads/other": core.HashFromBytes([]byte("not stored")).String(),
+	}, false)
+	if resp.StatusCode != 409 {
+		t.Fatalf("batch with a missing object: status %d, want 409 (body %q)", resp.StatusCode, body)
+	}
+	if _, err := r.ReadRef("refs/heads/topic"); err == nil {
+		t.Error("a refused batch still wrote the acceptable ref")
+	}
+}
+
+// TestServeRefsPostRejectsUnsafeRefName covers the hole a raw POST would
+// otherwise open: the ref path is joined onto .qin, so "refs/../../evil" would
+// write a file outside the repository.
+func TestServeRefsPostRejectsUnsafeRefName(t *testing.T) {
 	root, err := ioutil.TempDir("", "qin-serve-ref-*")
 	if err != nil {
 		t.Fatal(err)
@@ -738,9 +784,9 @@ func TestServeRefPutRejectsUnsafeRefName(t *testing.T) {
 		"HEAD",
 		"refs/heads/a b",
 	} {
-		resp, body := putRef(t, server.URL, "ref/"+ref, hA.String())
+		resp, body := postRefs(t, server.URL, map[string]string{ref: hA.String()}, false)
 		if resp.StatusCode != 400 {
-			t.Errorf("PUT %q: status %d, want 400 (body %q)", ref, resp.StatusCode, body)
+			t.Errorf("POST %q: status %d, want 400 (body %q)", ref, resp.StatusCode, body)
 		}
 	}
 
@@ -786,34 +832,39 @@ func TestHTTPPushToCheckedOutBranchRefused(t *testing.T) {
 	}
 }
 
-// TestServeRefPutRefusesCheckedOutBranch is the server's own gate, reached
-// without a qin client: a raw PUT is refused because the target has that
-// branch checked out, and ?force=1 does not change that — the force signal
-// covers the fast-forward rule only, on the client and on the server alike.
-func TestServeRefPutRefusesCheckedOutBranch(t *testing.T) {
+// TestServeRefsPostRefusesCheckedOutBranch is the server's own gate, reached
+// without a qin client: a raw POST is refused because the target has that
+// branch checked out, and force does not change that — the force signal covers
+// the fast-forward rule only, on the client and on the server alike.
+func TestServeRefsPostRefusesCheckedOutBranch(t *testing.T) {
 	target, targetDir := newTargetDir(t, false)
 	server := startRepoServer(t, targetDir)
 	defer server.Close()
 
-	tip := strings.Repeat("ab", 32)
-	for _, path := range []string{"ref/refs/heads/main", "ref/refs/heads/main?force=1"} {
-		resp, body := putRef(t, server.URL, path, tip)
+	tipHash, err := target.StoreObject(core.ObjectBlob, []byte("tip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tip := tipHash.String()
+	for _, force := range []bool{false, true} {
+		updates := map[string]string{"refs/heads/main": tip}
+		resp, body := postRefs(t, server.URL, updates, force)
 		if resp.StatusCode != 409 {
-			t.Errorf("PUT %s: status %d, want 409 (body %q)", path, resp.StatusCode, body)
+			t.Errorf("POST (force %v): status %d, want 409 (body %q)", force, resp.StatusCode, body)
 		}
 		if !strings.Contains(body, "checked out") {
-			t.Errorf("PUT %s: body %q does not say why", path, body)
+			t.Errorf("POST (force %v): body %q does not say why", force, body)
 		}
 	}
 	if _, err := target.ReadRef("refs/heads/main"); err == nil {
-		t.Fatal("a refused PUT still wrote the target's main")
+		t.Fatal("a refused POST still wrote the target's main")
 	}
 
 	// A branch the target does not have checked out goes through, so the
 	// refusal is about that one ref rather than about the target.
-	resp, body := putRef(t, server.URL, "ref/refs/heads/topic", tip)
+	resp, body := postRefs(t, server.URL, map[string]string{"refs/heads/topic": tip}, false)
 	if resp.StatusCode != 200 {
-		t.Fatalf("PUT of an unchecked-out branch: status %d (body %q)", resp.StatusCode, body)
+		t.Fatalf("POST of an unchecked-out branch: status %d (body %q)", resp.StatusCode, body)
 	}
 }
 

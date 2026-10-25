@@ -35,8 +35,8 @@ func TestIgnoreMatcherBasic(t *testing.T) {
 	}
 
 	tests := []struct {
-		path  string
-		dir   bool
+		path    string
+		dir     bool
 		ignored bool
 	}{
 		{"debug.log", false, true},
@@ -45,7 +45,7 @@ func TestIgnoreMatcherBasic(t *testing.T) {
 		{"build", true, true},
 		{"build/output.o", false, true},
 		{"src/main.go", false, false},
-		{"config.yaml", false, true},   // anchored
+		{"config.yaml", false, true}, // anchored
 	}
 
 	for _, tt := range tests {
@@ -152,7 +152,7 @@ func TestGlobMatch(t *testing.T) {
 	}{
 		{"foo.txt", "*.txt", true},
 		{"foo.go", "*.txt", false},
-		{"src/foo.go", "*.go", true},  // non-anchored matches suffix
+		{"src/foo.go", "*.go", true}, // non-anchored matches suffix
 		{"file.txt", "file.?xt", true},
 		{"file.xxt", "file.?xt", true},
 		{"file.txtt", "file.?xt", false},
@@ -203,7 +203,7 @@ func TestIgnoreNegation(t *testing.T) {
 		ignored bool
 	}{
 		{"debug.log", true},
-		{"important.log", false},  // negated
+		{"important.log", false}, // negated
 		{"secret/data.key", true},
 		{"secret/README.md", false}, // negated
 		{"src/main.go", false},

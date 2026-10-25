@@ -276,6 +276,9 @@ func (r *Repository) ListBranches() ([]string, string, error) {
 	currentValid := false
 	var branches []string
 	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue // atomic write's temp file, not a branch
+		}
 		if !entry.IsDir() {
 			branches = append(branches, entry.Name())
 			if entry.Name() == current {

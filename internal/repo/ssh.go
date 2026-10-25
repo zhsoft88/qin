@@ -65,8 +65,15 @@ func sshStdin(host, cmd string, stdinData []byte) error {
 
 // ---- SSH remote operations ----
 
+// shellQuote protects one argument from the remote shell. Remote paths come
+// from the user's URL or repository name; without quoting a space splits the
+// command and a metacharacter runs whatever it spells.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func sshReadRef(host, repoPath, ref string) (string, error) {
-	cmd := fmt.Sprintf("cat %s", filepath.Join(repoPath, QinDir, ref))
+	cmd := fmt.Sprintf("cat %s", shellQuote(filepath.Join(repoPath, QinDir, ref)))
 	out, err := sshRun(host, cmd)
 	if err != nil {
 		return "", fmt.Errorf("read ref %s: %w", ref, err)
@@ -94,7 +101,7 @@ func sshRefKey(qinDir, path string) string {
 func sshListRefs(host, repoPath string) (map[string]string, error) {
 	qinDir := filepath.Join(repoPath, QinDir)
 	refsDir := filepath.Join(qinDir, "refs")
-	cmd := fmt.Sprintf("find %s -type f", refsDir)
+	cmd := fmt.Sprintf("find %s -type f", shellQuote(refsDir))
 	out, err := sshRun(host, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("list refs: %w", err)
@@ -103,14 +110,14 @@ func sshListRefs(host, repoPath string) (map[string]string, error) {
 	refs := make(map[string]string)
 	for _, path := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
+		if path == "" || hasDotComponent(path) {
+			continue // an atomic write's temp file, not a ref
 		}
 		ref := sshRefKey(qinDir, path)
 		if ref == "" {
 			continue
 		}
-		data, err := sshRun(host, fmt.Sprintf("cat %s", path))
+		data, err := sshRun(host, fmt.Sprintf("cat %s", shellQuote(path)))
 		if err != nil {
 			continue
 		}
@@ -139,7 +146,7 @@ func bareFromConfigJSON(data []byte) bool {
 // refs cannot tell us. The cat is plumbing; the decision is in
 // bareFromConfigJSON.
 func sshReadBare(host, repoPath string) bool {
-	out, err := sshRun(host, fmt.Sprintf("cat %s", filepath.Join(repoPath, QinDir, "config")))
+	out, err := sshRun(host, fmt.Sprintf("cat %s", shellQuote(filepath.Join(repoPath, QinDir, "config"))))
 	if err != nil {
 		return false
 	}
@@ -148,7 +155,7 @@ func sshReadBare(host, repoPath string) bool {
 
 func sshHasObject(host, repoPath string, hash core.Hash) bool {
 	objPath := rObjPath(repoPath, hash)
-	_, err := sshRun(host, fmt.Sprintf("test -f %s", objPath))
+	_, err := sshRun(host, fmt.Sprintf("test -f %s", shellQuote(objPath)))
 	return err == nil
 }
 
@@ -159,20 +166,43 @@ func rObjPath(repoPath string, hash core.Hash) string {
 }
 
 func sshReadObject(host, repoPath string, hash core.Hash) ([]byte, error) {
-	cmd := fmt.Sprintf("cat %s", rObjPath(repoPath, hash))
+	cmd := fmt.Sprintf("cat %s", shellQuote(rObjPath(repoPath, hash)))
 	return sshRun(host, cmd)
 }
 
+// sshAtomicWriteCmd is the remote command that replaces finalPath's content
+// with stdin. Writing straight to the final name leaves a truncated object
+// behind when the connection drops, and existence checks only look at the
+// name, so a later push would skip it forever. The temp name is dot-prefixed
+// so a concurrent ref listing does not mistake it for a ref; $$ makes it
+// unique per connection.
+func sshAtomicWriteCmd(finalPath string) string {
+	dir := filepath.Dir(finalPath)
+	base := filepath.Base(finalPath)
+	return fmt.Sprintf("mkdir -p %s && cat > %s/.tmp.$$.%s && mv %s/.tmp.$$.%s %s",
+		shellQuote(dir), shellQuote(dir), shellQuote(base),
+		shellQuote(dir), shellQuote(base), shellQuote(finalPath))
+}
+
 func sshWriteObject(host, repoPath string, hash core.Hash, data []byte) error {
-	objPath := rObjPath(repoPath, hash)
-	cmd := fmt.Sprintf("mkdir -p %s && cat > %s", filepath.Dir(objPath), objPath)
-	return sshStdin(host, cmd, data)
+	return sshStdin(host, sshAtomicWriteCmd(rObjPath(repoPath, hash)), data)
 }
 
 func sshWriteRef(host, repoPath, ref, hash string) error {
 	refPath := filepath.Join(repoPath, QinDir, ref)
-	cmd := fmt.Sprintf("mkdir -p %s && cat > %s", filepath.Dir(refPath), refPath)
-	return sshStdin(host, cmd, []byte(hash+"\n"))
+	return sshStdin(host, sshAtomicWriteCmd(refPath), []byte(hash+"\n"))
+}
+
+// hasDotComponent reports whether any path component starts with a dot. The
+// remote's find interleaves temp files with refs, and a "." component would
+// also mean the listing escaped the refs directory.
+func hasDotComponent(p string) bool {
+	for _, part := range strings.FieldsFunc(p, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- SSH collect missing (for push: walk local DAG, check remote via SSH) ----
@@ -263,7 +293,7 @@ func (r *Repository) sshCollectTree(host, repoPath string, set map[core.Hash]boo
 
 // ---- SSH fetch/push ----
 
-func (r *Repository) fetchSSH(host, repoPath, remoteName string) error {
+func (r *Repository) fetchSSH(host, repoPath, remoteName string, lazy bool) error {
 	refs, err := sshListRefs(host, repoPath)
 	if err != nil {
 		return fmt.Errorf("list refs: %w", err)
@@ -286,7 +316,7 @@ func (r *Repository) fetchSSH(host, repoPath, remoteName string) error {
 
 	// For each branch, collect all missing objects by walking the remote DAG
 	for branchName, hash := range branchRefs {
-		objects, err := r.sshCollectRemoteDAG(host, repoPath, hash)
+		objects, err := r.sshCollectRemoteDAG(host, repoPath, hash, lazy)
 		if err != nil {
 			return fmt.Errorf("collect for %s: %w", branchName, err)
 		}
@@ -297,44 +327,42 @@ func (r *Repository) fetchSSH(host, repoPath, remoteName string) error {
 
 	// Download objects
 	total := len(allObjects)
-	i := 0
-	for h := range allObjects {
-		i++
-		if total > 1 {
-			printProgress("fetching objects: %d/%d", i, total)
+	if total == 0 {
+		stage("collect", "everything up to date")
+	} else {
+		stage("collect", "%d objects", total)
+		i := 0
+		for h := range allObjects {
+			i++
+			printProgress("[transfer] %d/%d objects", i, total)
+			data, err := sshReadObject(host, repoPath, h)
+			if err != nil {
+				endProgressLine()
+				return fmt.Errorf("read object %s: %w", h.Short(), err)
+			}
+			if dh := core.HashFromBytes(data); dh != h {
+				endProgressLine()
+				return fmt.Errorf("integrity check failed for %s", h.Short())
+			}
+			dstPath := r.objectPath(h)
+			if err := writeFileAtomic(dstPath, data, 0644); err != nil {
+				endProgressLine()
+				return fmt.Errorf("write object %s: %w", h.Short(), err)
+			}
 		}
-		data, err := sshReadObject(host, repoPath, h)
-		if err != nil {
-			return fmt.Errorf("read object %s: %w", h.Short(), err)
-		}
-		if dh := core.HashFromBytes(data); dh != h {
-			return fmt.Errorf("integrity check failed for %s", h.Short())
-		}
-		dstPath := r.objectPath(h)
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-			return fmt.Errorf("create dir: %w", err)
-		}
-		tmpPath := dstPath + ".tmp"
-		if err := ioutil.WriteFile(tmpPath, data, 0644); err != nil {
-			os.Remove(tmpPath)
-			return err
-		}
-		if err := os.Rename(tmpPath, dstPath); err != nil {
-			os.Remove(tmpPath)
-			return err
-		}
-	}
-	if total > 1 {
-		printProgress("fetching objects: %d/%d done", i, total)
 		endProgressLine()
 	}
 
 	// Write remote-tracking refs
+	updates := make(map[string]string, len(branchRefs))
 	for branchName, hash := range branchRefs {
-		ref := "refs/remotes/" + remoteName + "/" + branchName
-		if err := r.WriteRef(ref, hash.String()); err != nil {
-			return fmt.Errorf("write ref: %w", err)
-		}
+		updates["refs/remotes/"+remoteName+"/"+branchName] = hash.String()
+	}
+	if len(updates) > 0 {
+		stage("refs", "updating %d refs", len(updates))
+	}
+	if err := r.applyRefUpdates(updates); err != nil {
+		return err
 	}
 
 	return nil
@@ -393,30 +421,34 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string, force bool) erro
 		for h := range objects {
 			allObjects[h] = true
 		}
+		printProgress("[collect] scanning: %d objects", len(allObjects))
 	}
 
 	// Upload objects
 	total := len(allObjects)
-	i := 0
-	for h := range allObjects {
-		i++
-		if total > 1 {
-			printProgress("pushing objects: %d/%d", i, total)
+	if total == 0 {
+		stage("collect", "everything up to date")
+	} else {
+		stage("collect", "%d objects", total)
+		i := 0
+		for h := range allObjects {
+			i++
+			printProgress("[transfer] %d/%d objects", i, total)
+			data, err := ioutil.ReadFile(r.objectPath(h))
+			if err != nil {
+				endProgressLine()
+				return fmt.Errorf("read %s: %w", h.Short(), err)
+			}
+			if err := sshWriteObject(host, repoPath, h, data); err != nil {
+				endProgressLine()
+				return fmt.Errorf("upload %s: %w", h.Short(), err)
+			}
 		}
-		data, err := ioutil.ReadFile(r.objectPath(h))
-		if err != nil {
-			return fmt.Errorf("read %s: %w", h.Short(), err)
-		}
-		if err := sshWriteObject(host, repoPath, h, data); err != nil {
-			return fmt.Errorf("upload %s: %w", h.Short(), err)
-		}
-	}
-	if total > 1 {
-		printProgress("pushing objects: %d/%d done", i, total)
 		endProgressLine()
 	}
 
 	// Update refs, in the preflight's order.
+	var updateRefs, updateHashes []string
 	for _, branchName := range branches {
 		hash, ok := branchRefs[branchName]
 		if !ok {
@@ -426,9 +458,19 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string, force bool) erro
 		if st.Refs[ref] == hash.String() {
 			continue
 		}
-		if err := sshWriteRef(host, repoPath, ref, hash.String()); err != nil {
-			return fmt.Errorf("update ref %s: %w", branchName, err)
+		updateRefs = append(updateRefs, ref)
+		updateHashes = append(updateHashes, hash.String())
+	}
+	if len(updateRefs) > 0 {
+		stage("refs", "updating %d refs", len(updateRefs))
+	}
+	for i, ref := range updateRefs {
+		if err := sshWriteRef(host, repoPath, ref, updateHashes[i]); err != nil {
+			return fmt.Errorf("update ref %s: %w", ref, err)
 		}
+	}
+	if total > 0 || len(updateRefs) > 0 {
+		fmt.Fprintf(os.Stderr, "pushed to %s\n", remoteName)
 	}
 
 	return nil
@@ -436,7 +478,7 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string, force bool) erro
 
 // sshCollectRemoteDAG walks the remote commit DAG via SSH, collecting objects
 // not present locally.
-func (r *Repository) sshCollectRemoteDAG(host, repoPath string, hash core.Hash) (map[core.Hash]bool, error) {
+func (r *Repository) sshCollectRemoteDAG(host, repoPath string, hash core.Hash, lazy bool) (map[core.Hash]bool, error) {
 	set := make(map[core.Hash]bool)
 	visited := make(map[core.Hash]bool)
 
@@ -470,7 +512,7 @@ func (r *Repository) sshCollectRemoteDAG(host, repoPath string, hash core.Hash) 
 		set[h] = true
 
 		// Collect tree via SSH
-		treeSet, err := r.sshCollectRemoteTree(host, repoPath, commit.Tree)
+		treeSet, err := r.sshCollectRemoteTree(host, repoPath, commit.Tree, lazy)
 		if err != nil {
 			return err
 		}
@@ -492,7 +534,7 @@ func (r *Repository) sshCollectRemoteDAG(host, repoPath string, hash core.Hash) 
 	return set, nil
 }
 
-func (r *Repository) sshCollectRemoteTree(host, repoPath string, treeHash core.Hash) (map[core.Hash]bool, error) {
+func (r *Repository) sshCollectRemoteTree(host, repoPath string, treeHash core.Hash, lazy bool) (map[core.Hash]bool, error) {
 	set := make(map[core.Hash]bool)
 	visited := make(map[core.Hash]bool)
 
@@ -539,8 +581,12 @@ func (r *Repository) sshCollectRemoteTree(host, repoPath string, treeHash core.H
 			}
 
 			if eType == core.ObjectChunkManifest {
-				// A manifest, not a file: the entry was read fine, and its
-				// chunks are what has to travel.
+				// A manifest, not a file. The manifest itself always travels;
+				// its chunks are the lazy part.
+				set[entry.Hash] = true
+				if lazy {
+					continue
+				}
 				var manifest ChunkManifest
 				if err := core.DeserializeJSON(eContent, &manifest); err != nil {
 					return err

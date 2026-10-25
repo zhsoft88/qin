@@ -1881,7 +1881,14 @@ func runServe(args []string) error {
 		handler = http.HandlerFunc(r.ServeHTTP)
 	}
 
-	server := &http.Server{Addr: *addr, Handler: handler}
+	// ReadHeaderTimeout bounds how long a client may hold a connection before
+	// sending its request. There is deliberately no WriteTimeout: it would cut
+	// a large pack download off mid-stream.
+	server := &http.Server{
+		Addr:              *addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 30 * time.Second,
+	}
 
 	// Graceful shutdown: on SIGINT/SIGTERM, stop accepting new connections
 	// and let in-flight requests finish, bounded by a timeout so a stuck

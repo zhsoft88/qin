@@ -1922,3 +1922,137 @@ func TestPushRefusesMissingTree(t *testing.T) {
 		t.Errorf("failed push left %d objects on the target", len(objects))
 	}
 }
+
+// TestPullAbortsWhenChunkCannotBeFetched: a chunk the remote does not have
+// must fail the pull before the merge. Merging anyway would move HEAD to a
+// commit whose large file cannot be reconstructed.
+func TestPullAbortsWhenChunkCannotBeFetched(t *testing.T) {
+	remoteDir := t.TempDir()
+	remote, err := Init(remoteDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote.Config.Core.ChunkMinSize = 128
+	remote.Config.Core.ChunkThreshold = 512
+	remote.Config.Core.ChunkMaxSize = 1024
+
+	data := make([]byte, 3000)
+	for i := range data {
+		data[i] = byte(i % 256)
+	}
+	remoteFile := filepath.Join(remoteDir, "big.bin")
+	if err := ioutil.WriteFile(remoteFile, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.AddFile(remoteFile); err != nil {
+		t.Fatal(err)
+	}
+	tip, err := remote.WriteCommit("Test", "chunked")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	commit, err := remote.LoadCommit(tip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := remote.LoadTree(commit.Tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifestHash core.Hash
+	for _, entry := range tree.Entries {
+		if entry.Name == "big.bin" {
+			manifestHash = entry.Hash
+		}
+	}
+	if manifestHash.IsZero() {
+		t.Fatal("fixture tree has no big.bin")
+	}
+	manifest, err := remote.LoadChunkManifest(manifestHash)
+	if err != nil {
+		t.Fatalf("fixture should be chunked: %v", err)
+	}
+	if len(manifest.Chunks) == 0 {
+		t.Fatal("fixture manifest has no chunks")
+	}
+	if err := os.Remove(remote.objectPath(manifest.Chunks[0].Hash)); err != nil {
+		t.Fatal(err)
+	}
+
+	localDir := t.TempDir()
+	local, err := Init(localDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := local.SaveRemote("origin", remoteDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := local.SetHEAD("ref: refs/heads/main"); err != nil {
+		t.Fatal(err)
+	}
+	// The pull-side scan only treats entries above its own chunk threshold as
+	// large files, so match the remote's lowered setting.
+	local.Config.Core.ChunkThreshold = 512
+
+	_, err = local.Pull("origin")
+	if err == nil {
+		t.Fatal("pull should fail when a chunk cannot be fetched")
+	}
+	if !strings.Contains(err.Error(), "chunk") {
+		t.Fatalf("error should name the chunk: %v", err)
+	}
+	if _, refErr := local.ReadRef("refs/heads/main"); refErr == nil {
+		t.Fatal("pull advanced main despite the missing chunk")
+	}
+	if _, statErr := os.Lstat(filepath.Join(localDir, "big.bin")); statErr == nil {
+		t.Fatal("pull checked out the worktree despite the missing chunk")
+	}
+}
+
+// TestFailedCloneLeavesNothingBehind: a clone that fails rolls back what it
+// created. A directory it made is removed whole; an existing directory keeps
+// the user's files and loses only the .qin the clone added.
+func TestFailedCloneLeavesNothingBehind(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "missing")
+
+	newDir := filepath.Join(t.TempDir(), "clone")
+	if _, err := Clone(source, newDir, false); err == nil {
+		t.Fatal("clone from a missing remote should fail")
+	}
+	if _, err := os.Stat(newDir); !os.IsNotExist(err) {
+		t.Fatalf("failed clone left %s behind", newDir)
+	}
+
+	existing := t.TempDir()
+	userFile := filepath.Join(existing, "keep.txt")
+	if err := ioutil.WriteFile(userFile, []byte("mine"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Clone(source, existing, false); err == nil {
+		t.Fatal("clone into an existing directory from a missing remote should fail")
+	}
+	if _, err := ioutil.ReadFile(userFile); err != nil {
+		t.Fatalf("failed clone removed the user's file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(existing, QinDir)); !os.IsNotExist(err) {
+		t.Fatal("failed clone left its .qin behind")
+	}
+
+	// A directory that is already a repository is refused, and the refusal
+	// must not delete the repository Clone did not create.
+	repoDir := t.TempDir()
+	if _, err := Init(repoDir); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(repoDir, QinDir, "marker")
+	if err := ioutil.WriteFile(marker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Clone(source, repoDir, false); err == nil {
+		t.Fatal("clone into an existing repository should fail")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatal("failed clone removed a repository it did not create")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/zhsoft88/qin/internal/core"
@@ -67,7 +68,7 @@ func (r *Repository) markReachableRefs(reachable map[core.Hash]bool) error {
 		if err != nil {
 			return nil // skip inaccessible entries
 		}
-		if fi.IsDir() {
+		if fi.IsDir() || strings.HasPrefix(fi.Name(), ".") {
 			return nil
 		}
 		data, err := ioutil.ReadFile(path)
@@ -126,7 +127,7 @@ func (r *Repository) enumerateCommits() ([]core.Hash, error) {
 			continue
 		}
 		for _, f := range files {
-			if f.IsDir() {
+			if f.IsDir() || strings.HasPrefix(f.Name(), ".") {
 				continue
 			}
 			fullHex := dirEntry.Name() + f.Name()

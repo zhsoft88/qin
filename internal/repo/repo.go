@@ -128,13 +128,18 @@ func openExactRoot(path string) (*Repository, error) {
 }
 
 // repoAt builds the Repository rooted at dir, whose .qin has already been
-// confirmed to exist.
+// confirmed to exist. Any interrupted ref transaction is completed here, so
+// every command starts from a consistent set of refs.
 func repoAt(dir string) (*Repository, error) {
 	cfg, err := LoadConfig(dir)
 	if err != nil {
 		return nil, err
 	}
-	return &Repository{Path: dir, Config: cfg}, nil
+	r := &Repository{Path: dir, Config: cfg}
+	if err := r.recoverRefsTxn(); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 func (r *Repository) QinDir() string {
@@ -169,7 +174,7 @@ func (r *Repository) ReadHEAD() (string, error) {
 
 // SetHEAD sets HEAD to a symbolic ref.
 func (r *Repository) SetHEAD(ref string) error {
-	return ioutil.WriteFile(r.HeadPath(), []byte(ref+"\n"), 0644)
+	return writeFileAtomicDurable(r.HeadPath(), []byte(ref+"\n"), 0644)
 }
 
 // ReadRef reads the commit hash a ref points to.
@@ -186,13 +191,14 @@ func (r *Repository) ReadRef(ref string) (string, error) {
 	return hash, nil
 }
 
-// WriteRef writes a commit hash to a ref.
+// WriteRef writes a commit hash to a ref. A single ref update is atomic on its
+// own; updates that must land together go through applyRefUpdates.
 func (r *Repository) WriteRef(ref, hash string) error {
-	refPath := filepath.Join(r.Path, QinDir, ref)
-	if err := os.MkdirAll(filepath.Dir(refPath), 0755); err != nil {
-		return err
+	if !safeRefPath(ref) {
+		return fmt.Errorf("invalid ref name: %q", ref)
 	}
-	return ioutil.WriteFile(refPath, []byte(hash+"\n"), 0644)
+	refPath := filepath.Join(r.Path, QinDir, ref)
+	return writeFileAtomic(refPath, []byte(hash+"\n"), 0644)
 }
 
 // ResolveHEAD resolves HEAD to the current commit hash (or empty if no commits).

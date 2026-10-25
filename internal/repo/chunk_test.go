@@ -121,7 +121,7 @@ func TestAddFileAutoChunksLarge(t *testing.T) {
 	repo.Config.Core.ChunkThreshold = 4096
 	repo.Config.Core.ChunkMaxSize = 8192
 
-		// Create a file > chunk min size
+	// Create a file > chunk min size
 	data := make([]byte, 10000)
 	for i := range data {
 		data[i] = byte(i * 7)

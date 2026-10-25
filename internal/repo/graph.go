@@ -46,7 +46,7 @@ func (r *Repository) WalkAllGraph(max int) ([]GraphCommit, error) {
 
 	var heads []core.Hash
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		data, err := ioutil.ReadFile(headsDir + "/" + entry.Name())

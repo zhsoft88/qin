@@ -273,22 +273,26 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
-	total := len(manifest.Chunks)
-	downloaded := 0
-	for i, chunk := range manifest.Chunks {
-		if !r.HasObject(chunk.Hash) {
-			if total > 1 {
-				printProgress(" pulling chunks: %d/%d", i+1, total)
-			}
-			if err := r.copyObjectFromRemote(remoteURL, chunk.Hash); err != nil {
-				return fmt.Errorf("copy chunk %s: %w", chunk.Hash.Short(), err)
-			}
-			downloaded++
+	var missing []core.Hash
+	for _, chunk := range manifest.Chunks {
+		if !chunk.Hash.IsZero() && !r.HasObject(chunk.Hash) {
+			missing = append(missing, chunk.Hash)
 		}
 	}
-	if total > 1 && downloaded > 0 {
-		printProgress("pulled %d chunk(s)", downloaded)
-		endProgressLine()
+	if len(missing) > 0 {
+		stage("chunks", "%d objects", len(missing))
+		if isHTTPURL(remoteURL) {
+			if err := r.httpDownloadObjects(remoteURL, missing); err != nil {
+				return fmt.Errorf("fetch chunks: %w", err)
+			}
+		} else {
+			for i, h := range missing {
+				printProgress("[chunks] %d/%d objects", i+1, len(missing))
+				if err := r.copyObjectFromRemote(remoteURL, h); err != nil {
+					return fmt.Errorf("copy chunk %s: %w", h.Short(), err)
+				}
+			}
+		}
 	}
 
 	// Reconstruct and write real file content
@@ -447,19 +451,8 @@ func copyObject(src, dst *Repository, hash core.Hash) error {
 	}
 
 	dstPath := dst.objectPath(hash)
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-		return fmt.Errorf("create object dir: %w", err)
-	}
-
-	// Atomic write: temp file + rename to prevent partial files
-	tmpPath := dstPath + ".tmp"
-	if err := ioutil.WriteFile(tmpPath, data, 0644); err != nil {
-		os.Remove(tmpPath)
+	if err := writeFileAtomic(dstPath, data, 0644); err != nil {
 		return fmt.Errorf("write object %s: %w", hash.Short(), err)
-	}
-	if err := os.Rename(tmpPath, dstPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("rename object %s: %w", hash.Short(), err)
 	}
 
 	return nil
@@ -468,12 +461,17 @@ func copyObject(src, dst *Repository, hash core.Hash) error {
 // copyObjectFromRemote reads an object from a remote URL (local, HTTP, or SSH)
 // and writes it to the local object store with integrity checking and atomic write.
 func (r *Repository) copyObjectFromRemote(remoteURL string, hash core.Hash) error {
+	// HTTP moves objects only inside a pack. One object is a one-record pack;
+	// the callers that fetch many objects at once (pull's chunks, LfsPull) use
+	// httpDownloadObjects so the whole set travels in one stream.
+	if isHTTPURL(remoteURL) {
+		return r.httpDownloadObjects(remoteURL, []core.Hash{hash})
+	}
+
 	var data []byte
 	var err error
 
 	switch {
-	case isHTTPURL(remoteURL):
-		data, err = httpReadObject(remoteURL, hash)
 	case isSSHURL(remoteURL):
 		var host, repoPath string
 		host, repoPath, err = sshParseURL(remoteURL)
@@ -497,19 +495,8 @@ func (r *Repository) copyObjectFromRemote(remoteURL string, hash core.Hash) erro
 	}
 
 	dstPath := r.objectPath(hash)
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
-		return fmt.Errorf("create object dir: %w", err)
-	}
-
-	// Atomic write
-	tmpPath := dstPath + ".tmp"
-	if err := ioutil.WriteFile(tmpPath, data, 0644); err != nil {
-		os.Remove(tmpPath)
+	if err := writeFileAtomic(dstPath, data, 0644); err != nil {
 		return fmt.Errorf("write object %s: %w", hash.Short(), err)
-	}
-	if err := os.Rename(tmpPath, dstPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("rename object %s: %w", hash.Short(), err)
 	}
 
 	return nil
@@ -539,7 +526,7 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 		if err != nil {
 			return err
 		}
-		return r.fetchSSH(host, repoPath, remoteName)
+		return r.fetchSSH(host, repoPath, remoteName, lazy)
 	}
 
 	// Local path
@@ -577,26 +564,31 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 	}
 
 	total := len(allObjects)
-	i := 0
-	for h := range allObjects {
-		i++
-		if total > 1 {
-			printProgress("fetching objects: %d/%d", i, total)
+	if total == 0 {
+		stage("collect", "everything up to date")
+	} else {
+		stage("collect", "%d objects", total)
+		i := 0
+		for h := range allObjects {
+			i++
+			printProgress("[transfer] %d/%d objects", i, total)
+			if err := copyObject(remoteRepo, r, h); err != nil {
+				endProgressLine()
+				return fmt.Errorf("copy object %s: %w", h.Short(), err)
+			}
 		}
-		if err := copyObject(remoteRepo, r, h); err != nil {
-			return fmt.Errorf("copy object %s: %w", h.Short(), err)
-		}
-	}
-	if total > 1 {
-		printProgress("fetching objects: %d/%d done", i, total)
 		endProgressLine()
 	}
 
+	updates := make(map[string]string, len(branchRefs))
 	for branchName, hash := range branchRefs {
-		ref := "refs/remotes/" + remoteName + "/" + branchName
-		if err := r.WriteRef(ref, hash.String()); err != nil {
-			return fmt.Errorf("write ref %s: %w", ref, err)
-		}
+		updates["refs/remotes/"+remoteName+"/"+branchName] = hash.String()
+	}
+	if len(updates) > 0 {
+		stage("refs", "updating %d refs", len(updates))
+	}
+	if err := r.applyRefUpdates(updates); err != nil {
+		return err
 	}
 
 	return nil
@@ -648,7 +640,7 @@ func (r *Repository) Push(remoteName string, force bool) error {
 	allObjects := make(map[core.Hash]bool)
 	branchRefs := make(map[string]core.Hash)
 
-	fmt.Fprintf(os.Stderr, "scanning repository...\n")
+	printProgress("[collect] scanning: 0 objects")
 	for _, branchName := range branches {
 		hashStr, ok := tips["refs/heads/"+branchName]
 		if !ok {
@@ -662,42 +654,39 @@ func (r *Repository) Push(remoteName string, force bool) error {
 
 		objects, err := r.collectObjects(remoteRepo, hash, false)
 		if err != nil {
+			endProgressLine()
 			return fmt.Errorf("collect objects for %s: %w", branchName, err)
 		}
 		for h := range objects {
 			allObjects[h] = true
 		}
+		printProgress("[collect] scanning: %d objects", len(allObjects))
 	}
+	endProgressLine()
 
 	total := len(allObjects)
 	if total == 0 {
 		// No object has to move, but a ref may still be missing: an
 		// interrupted push writes objects before refs, and this retry has to
 		// finish that rather than report success and stop.
-		fmt.Fprintf(os.Stderr, "everything up to date\n")
-	}
-	if total > 1 {
-		printProgress("found %d objects to push", total)
-		endProgressLine()
-	}
-	i := 0
-	for h := range allObjects {
-		i++
-		if total > 1 {
-			printProgress("pushing objects: %d/%d", i, total)
+		stage("collect", "everything up to date")
+	} else {
+		stage("collect", "%d objects", total)
+		i := 0
+		for h := range allObjects {
+			i++
+			printProgress("[transfer] %d/%d objects", i, total)
+			if err := copyObject(r, remoteRepo, h); err != nil {
+				endProgressLine()
+				return fmt.Errorf("copy object %s: %w", h.Short(), err)
+			}
 		}
-		if err := copyObject(r, remoteRepo, h); err != nil {
-			return fmt.Errorf("copy object %s: %w", h.Short(), err)
-		}
-	}
-	if total > 1 {
-		printProgress("pushing objects: %d/%d done", i, total)
 		endProgressLine()
 	}
 	// Write the refs in the order the preflight used. A ref already pointing
 	// where it should is left alone; every other one is written even when no
 	// object had to move.
-	wroteRef := false
+	updates := make(map[string]string)
 	for _, branchName := range branches {
 		hash, ok := branchRefs[branchName]
 		if !ok {
@@ -707,11 +696,15 @@ func (r *Repository) Push(remoteName string, force bool) error {
 		if st.Refs[ref] == hash.String() {
 			continue
 		}
-		if err := remoteRepo.WriteRef(ref, hash.String()); err != nil {
-			return fmt.Errorf("write ref %s: %w", ref, err)
-		}
-		wroteRef = true
+		updates[ref] = hash.String()
 	}
+	if len(updates) > 0 {
+		stage("refs", "updating %d refs", len(updates))
+	}
+	if err := remoteRepo.applyRefUpdates(updates); err != nil {
+		return err
+	}
+	wroteRef := len(updates) > 0
 	if total > 0 || wroteRef {
 		fmt.Fprintf(os.Stderr, "pushed to %s\n", remoteName)
 	}
@@ -795,41 +788,70 @@ func (r *Repository) Pull(remoteName string) (*MergeResult, error) {
 	}
 
 	// Step 2: Collect chunk hashes needed for current OS
-	fmt.Fprintf(os.Stderr, "scanning tree...\n")
+	stage("chunks", "scanning tree")
 	needed, err := r.collectOSChunks(hash)
 	if err != nil {
 		return nil, fmt.Errorf("collect needed chunks: %w", err)
 	}
 
-	// Step 3: Fetch only those chunk blobs from remote
+	// Step 3: Fetch only those chunk blobs from remote. A failure aborts the
+	// pull before the merge: merging a manifest whose chunks are missing
+	// leaves a working tree whose large files cannot be read back.
 	total := len(needed)
 	if total > 0 {
-		fmt.Fprintf(os.Stderr, "pulling %d large file chunks...\n", total)
-		i := 0
-		for h := range needed {
-			i++
-			if total > 1 {
-				printProgress("  chunks: %d/%d", i, total)
+		stage("chunks", "%d objects", total)
+		if isHTTPURL(remoteURL) {
+			hashes := make([]core.Hash, 0, total)
+			for h := range needed {
+				hashes = append(hashes, h)
 			}
-			if err := r.copyObjectFromRemote(remoteURL, h); err != nil {
-				fmt.Fprintf(os.Stderr, "\nwarning: failed to fetch chunk %s: %s\n", h.Short(), err)
+			if err := r.httpDownloadObjects(remoteURL, hashes); err != nil {
+				return nil, fmt.Errorf("fetch chunks: %w", err)
 			}
-		}
-		if total > 1 {
-			printProgress("  chunks: %d/%d done", i, total)
+		} else {
+			i := 0
+			for h := range needed {
+				i++
+				printProgress("[chunks] %d/%d objects", i, total)
+				if err := r.copyObjectFromRemote(remoteURL, h); err != nil {
+					endProgressLine()
+					return nil, fmt.Errorf("fetch chunk %s: %w", h.Short(), err)
+				}
+			}
 			endProgressLine()
 		}
 	}
 
 	// Step 4: Merge
-	fmt.Fprintf(os.Stderr, "merging...\n")
+	stage("merge", "")
 	return r.mergeCommit(hash, remoteName+"/"+branch)
 }
 
 // Clone initializes a new repository, adds a remote, fetches its objects,
 // and checks out the default branch. When lazy is true, large file chunks
 // are not fetched (placeholders are written instead).
-func Clone(url, dir string, lazy bool) (*Repository, error) {
+func Clone(url, dir string, lazy bool) (_ *Repository, err error) {
+	// A failed clone leaves nothing behind. A directory Clone created is
+	// removed whole; a directory that already existed loses only the .qin
+	// this call added, because the user's files there were never Clone's to
+	// delete. A .qin that was already present — Init's "already a
+	// repository" refusal — is never removed, and Init's own partial work is
+	// cleaned up on the same terms.
+	_, statErr := os.Stat(dir)
+	dirExisted := statErr == nil
+	_, qinStatErr := os.Stat(filepath.Join(dir, QinDir))
+	qinExisted := qinStatErr == nil
+	defer func() {
+		if err == nil {
+			return
+		}
+		if !dirExisted {
+			os.RemoveAll(dir)
+		} else if !qinExisted {
+			os.RemoveAll(filepath.Join(dir, QinDir))
+		}
+	}()
+
 	r, err := Init(dir)
 	if err != nil {
 		return nil, fmt.Errorf("init: %w", err)
@@ -882,6 +904,7 @@ func Clone(url, dir string, lazy bool) (*Repository, error) {
 		if err := r.WriteRef("refs/heads/"+branchName, hashStr); err != nil {
 			return nil, fmt.Errorf("create local branch: %w", err)
 		}
+		stage("checkout", "branch %s", branchName)
 		if err := r.SwitchBranch(branchName); err != nil {
 			return nil, fmt.Errorf("checkout branch: %w", err)
 		}
