@@ -656,3 +656,89 @@ func TestServeRefsSkipsAtomicTempFiles(t *testing.T) {
 		}
 	}
 }
+
+// TestCollectForPlanBoundaryIsTheHaveSnapshot pins the fix for /plan scaling
+// with the whole repository: a client's have is taken as the snapshot its tip
+// names, so a tip the client already has plans zero objects instead of walking
+// the have's entire history, and a one-file change sends the new commit, its
+// tree and the changed object only.
+func TestCollectForPlanBoundaryIsTheHaveSnapshot(t *testing.T) {
+	r, err := Init(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeBlob := func(content string) core.Hash {
+		h, err := r.StoreObject(core.ObjectBlob, []byte(content))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	storeTree := func(entries []TreeEntry) core.Hash {
+		content, err := core.SerializeJSON(&Tree{Entries: entries})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := r.StoreObject(core.ObjectTree, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+	storeCommit := func(tree core.Hash, parents []core.Hash) core.Hash {
+		content, err := core.SerializeJSON(Commit{Tree: tree, Parents: parents, Author: "Test", Message: "m", Time: time.Now()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := r.StoreObject(core.ObjectCommit, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+
+	blobA := storeBlob("a")
+	blobB1 := storeBlob("b1")
+	tree1 := storeTree([]TreeEntry{
+		{Name: "a.txt", Hash: blobA, Mode: 0644},
+		{Name: "b.txt", Hash: blobB1, Mode: 0644},
+	})
+	commit1 := storeCommit(tree1, nil)
+
+	blobB2 := storeBlob("b2")
+	tree2 := storeTree([]TreeEntry{
+		{Name: "a.txt", Hash: blobA, Mode: 0644},
+		{Name: "b.txt", Hash: blobB2, Mode: 0644},
+	})
+	commit2 := storeCommit(tree2, []core.Hash{commit1})
+
+	for _, lazy := range []bool{true, false} {
+		plan, err := r.collectForPlan([]core.Hash{commit2}, []core.Hash{commit2}, lazy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plan) != 0 {
+			t.Fatalf("lazy=%v: a tip the client already has planned %d objects", lazy, len(plan))
+		}
+
+		plan, err = r.collectForPlan([]core.Hash{commit2}, []core.Hash{commit1}, lazy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make(map[core.Hash]bool, len(plan))
+		for _, h := range plan {
+			got[h] = true
+		}
+		want := map[core.Hash]bool{commit2: true, tree2: true, blobB2: true}
+		for h := range want {
+			if !got[h] {
+				t.Errorf("lazy=%v: plan missed %s", lazy, h.Short())
+			}
+		}
+		for h := range got {
+			if !want[h] {
+				t.Errorf("lazy=%v: plan carried %s, which the have already covers", lazy, h.Short())
+			}
+		}
+	}
+}

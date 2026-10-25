@@ -432,8 +432,8 @@ func (r *Repository) collectForPlan(wants, haves []core.Hash, lazy bool) ([]core
 		if h.IsZero() || !r.HasObject(h) {
 			continue
 		}
-		if err := r.walkPlanObject(h, seen, lazy, nil); err != nil {
-			return nil, err
+		if err := r.markPlanSnapshot(h, seen); err != nil {
+			return nil, fmt.Errorf("have %s: %w", h.Short(), err)
 		}
 	}
 
@@ -445,6 +445,57 @@ func (r *Repository) collectForPlan(wants, haves []core.Hash, lazy bool) ([]core
 		}
 	}
 	return collected, nil
+}
+
+// markPlanSnapshot records what a client's have tip proves it already holds:
+// the commit, its tree, and every object the tree names.
+//
+// A tree is one flat snapshot, so this costs one commit and one tree read —
+// not a walk. Walking the have's history instead (every ancestor commit and
+// every object its tree names, reading each object's header to learn its
+// type) is what made /plan scale with the repository's whole object universe:
+// a client asking about a tip it already had made the server read a million
+// objects before answering "nothing to send".
+//
+// The commit hash itself goes into seen so the walk from wants stops there;
+// the have's ancestors are therefore never collected. Historical objects that
+// exist only in the have's past and are named again by a new commit may be
+// sent a second time — harmless, because the client's install skips objects
+// it already has. The one content a have does not prove is present is a lazy
+// clone's chunk blobs: a lazy pack does not carry chunks at all, and pull
+// fetches the chunks it needs through the explicit-hash plan.
+func (r *Repository) markPlanSnapshot(hash core.Hash, seen map[core.Hash]bool) error {
+	if seen[hash] {
+		return nil
+	}
+	typ, err := r.ObjectType(hash)
+	if err != nil {
+		return err
+	}
+	seen[hash] = true
+	if typ != core.ObjectCommit {
+		// A have is only ever a boundary: whatever kind of object it is, the
+		// client says it holds it, so it is not something to send.
+		return nil
+	}
+	commit, err := r.LoadCommit(hash)
+	if err != nil {
+		return err
+	}
+	if commit.Tree.IsZero() || seen[commit.Tree] {
+		return nil
+	}
+	seen[commit.Tree] = true
+	tree, err := r.LoadTree(commit.Tree)
+	if err != nil {
+		return err
+	}
+	for _, entry := range tree.Entries {
+		if !entry.Hash.IsZero() {
+			seen[entry.Hash] = true
+		}
+	}
+	return nil
 }
 
 func (r *Repository) walkPlanObject(hash core.Hash, seen map[core.Hash]bool, lazy bool, add func(core.Hash)) error {
@@ -481,7 +532,20 @@ func (r *Repository) walkPlanObject(hash core.Hash, seen map[core.Hash]bool, laz
 			return fmt.Errorf("cannot read tree %s: %w", hash.Short(), err)
 		}
 		for _, entry := range tree.Entries {
-			if IsSubmoduleMode(entry.Mode) {
+			if IsSubmoduleMode(entry.Mode) || entry.Hash.IsZero() {
+				continue
+			}
+			if lazy {
+				// A tree is one flat snapshot and its entries are files or
+				// chunk manifests. A lazy pack carries both without their
+				// chunks, so neither kind needs its header read to decide
+				// what to send — which matters on a large first clone.
+				if !seen[entry.Hash] {
+					seen[entry.Hash] = true
+					if add != nil {
+						add(entry.Hash)
+					}
+				}
 				continue
 			}
 			if err := r.walkPlanObject(entry.Hash, seen, lazy, add); err != nil {
