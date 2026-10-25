@@ -1240,6 +1240,42 @@ func TestStageEndsProgressLine(t *testing.T) {
 	}
 }
 
+// The per-object loops (install, transfer, chunks) must not draw every object
+// when stderr is a pipe: the line only has to be fresh, and one line per
+// object turns a large transfer into a log of its own size.
+func TestProgressThrottleSkipsRapidUpdates(t *testing.T) {
+	old := os.Stderr
+	f, err := ioutil.TempFile("", "qin-throttle-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	os.Stderr = f
+	defer func() { os.Stderr = old }()
+
+	maxProgressLen = 0
+
+	var p progressThrottle
+	p.print("first")
+	p.print("second") // inside the interval: not drawn
+	time.Sleep(progressInterval + 50*time.Millisecond)
+	p.print("third")
+	endProgressLine()
+
+	if err := f.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := ioutil.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "\rfirst\r\rthird\r\n"
+	if string(data) != want {
+		t.Fatalf("throttled output = %q, want %q", string(data), want)
+	}
+}
+
 func TestFormatBytes(t *testing.T) {
 	cases := []struct {
 		n    int64

@@ -177,9 +177,10 @@ func (r *Repository) unpackPack(partPath string) (int, error) {
 	}
 
 	installed := 0
+	var progress progressThrottle
 	err = core.ReadPack(f, func(hash core.Hash, src io.Reader, size int64) error {
 		installed++
-		printProgress("[install] %d/%d objects", installed, count)
+		progress.print("[install] %d/%d objects", installed, count)
 		return r.installPackObject(hash, src, size)
 	})
 	if err != nil {

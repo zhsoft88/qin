@@ -332,9 +332,10 @@ func (r *Repository) fetchSSH(host, repoPath, remoteName string, lazy bool) erro
 	} else {
 		stage("collect", "%d objects", total)
 		i := 0
+		var progress progressThrottle
 		for h := range allObjects {
 			i++
-			printProgress("[transfer] %d/%d objects", i, total)
+			progress.print("[transfer] %d/%d objects", i, total)
 			data, err := sshReadObject(host, repoPath, h)
 			if err != nil {
 				endProgressLine()
@@ -431,9 +432,10 @@ func (r *Repository) pushSSH(host, repoPath, remoteName string, force bool) erro
 	} else {
 		stage("collect", "%d objects", total)
 		i := 0
+		var progress progressThrottle
 		for h := range allObjects {
 			i++
-			printProgress("[transfer] %d/%d objects", i, total)
+			progress.print("[transfer] %d/%d objects", i, total)
 			data, err := ioutil.ReadFile(r.objectPath(h))
 			if err != nil {
 				endProgressLine()

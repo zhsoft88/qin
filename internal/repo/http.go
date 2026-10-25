@@ -23,7 +23,6 @@ import (
 const (
 	httpTransferAttempts = 3
 	httpHasBatch         = 20000
-	httpProgressInterval = 200 * time.Millisecond
 )
 
 // httpClient is used for every remote call. It carries timeouts on connecting
@@ -330,20 +329,17 @@ func (r *Repository) httpDownloadPack(baseURL string, body []byte, contentType s
 // progressWriter reports bytes written in place, throttled so a fast local
 // link does not spend its time formatting progress lines.
 type progressWriter struct {
-	w     io.Writer
-	label string
-	done  int64
-	total int64
-	last  time.Time
+	w        io.Writer
+	label    string
+	done     int64
+	total    int64
+	throttle progressThrottle
 }
 
 func (p *progressWriter) Write(b []byte) (int, error) {
 	n, err := p.w.Write(b)
 	p.done += int64(n)
-	if time.Since(p.last) >= httpProgressInterval {
-		p.last = time.Now()
-		printProgress("[%s] %s/%s", p.label, formatBytes(p.done), formatBytes(p.total))
-	}
+	p.throttle.print("[%s] %s/%s", p.label, formatBytes(p.done), formatBytes(p.total))
 	return n, err
 }
 

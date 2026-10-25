@@ -287,8 +287,9 @@ func (r *Repository) LfsPull(remoteName string, filePath string) error {
 				return fmt.Errorf("fetch chunks: %w", err)
 			}
 		} else {
+			var progress progressThrottle
 			for i, h := range missing {
-				printProgress("[chunks] %d/%d objects", i+1, len(missing))
+				progress.print("[chunks] %d/%d objects", i+1, len(missing))
 				if err := r.copyObjectFromRemote(remoteURL, h); err != nil {
 					return fmt.Errorf("copy chunk %s: %w", h.Short(), err)
 				}
@@ -570,9 +571,10 @@ func (r *Repository) fetch(remoteName string, lazy bool) error {
 	} else {
 		stage("collect", "%d objects", total)
 		i := 0
+		var progress progressThrottle
 		for h := range allObjects {
 			i++
-			printProgress("[transfer] %d/%d objects", i, total)
+			progress.print("[transfer] %d/%d objects", i, total)
 			if err := copyObject(remoteRepo, r, h); err != nil {
 				endProgressLine()
 				return fmt.Errorf("copy object %s: %w", h.Short(), err)
@@ -674,9 +676,10 @@ func (r *Repository) Push(remoteName string, force bool) error {
 	} else {
 		stage("collect", "%d objects", total)
 		i := 0
+		var progress progressThrottle
 		for h := range allObjects {
 			i++
-			printProgress("[transfer] %d/%d objects", i, total)
+			progress.print("[transfer] %d/%d objects", i, total)
 			if err := copyObject(r, remoteRepo, h); err != nil {
 				endProgressLine()
 				return fmt.Errorf("copy object %s: %w", h.Short(), err)
@@ -811,9 +814,10 @@ func (r *Repository) Pull(remoteName string) (*MergeResult, error) {
 			}
 		} else {
 			i := 0
+			var progress progressThrottle
 			for h := range needed {
 				i++
-				printProgress("[chunks] %d/%d objects", i, total)
+				progress.print("[chunks] %d/%d objects", i, total)
 				if err := r.copyObjectFromRemote(remoteURL, h); err != nil {
 					endProgressLine()
 					return nil, fmt.Errorf("fetch chunk %s: %w", h.Short(), err)

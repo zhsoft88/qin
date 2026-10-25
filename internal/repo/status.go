@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/zhsoft88/qin/internal/core"
 )
@@ -569,6 +570,25 @@ var maxProgressLen int
 
 // printProgress rewrites the current stderr line with progress text. The line
 // is cleared to its widest recorded width before the new text is written.
+// progressInterval caps how often an in-place line drawn once per unit of work
+// is written. The line only has to be fresh: drawing one per object turns a
+// large transfer into one log line per object whenever stderr is a pipe.
+const progressInterval = 200 * time.Millisecond
+
+// progressThrottle rate-limits printProgress calls made from a hot loop. The
+// first call always draws, so a short operation still shows its line.
+type progressThrottle struct {
+	last time.Time
+}
+
+func (p *progressThrottle) print(format string, args ...interface{}) {
+	if !p.last.IsZero() && time.Since(p.last) < progressInterval {
+		return
+	}
+	p.last = time.Now()
+	printProgress(format, args...)
+}
+
 func printProgress(format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
 	pad := maxProgressLen - len(msg)
