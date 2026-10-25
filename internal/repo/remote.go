@@ -50,10 +50,11 @@ func isRemoteTransport(raw string) bool {
 // it against a different working directory. Network URLs are not paths and are
 // returned byte-identical.
 //
-// Existence is deliberately not checked: Clone records origin before its first
-// network call precisely so a failed clone still says where it came from, and a
-// remote may be unreachable or not created yet. A target is checked when it is
-// used, by openExactRoot.
+// Existence is deliberately not checked: a remote may be unreachable or not
+// created yet, and a target is checked when it is used, by openExactRoot.
+// Clone does record origin this way before its first network call — but it
+// rolls the whole directory back if that call fails, so the record survives
+// only in a clone that succeeded.
 func canonicalRemoteURL(url string) (string, error) {
 	if strings.TrimSpace(url) == "" {
 		return "", fmt.Errorf("remote URL is empty")
