@@ -358,13 +358,40 @@ func (r *Repository) removeWorkTreePath(name string, mode uint32) (bool, error) 
 // pruneEmptyParents removes directories that became empty because the file
 // was just removed. It stops at the first non-empty parent and never reaches
 // the repository root.
+//
+// The directory the process runs in is never removed, even when it is empty
+// now: without a working directory the command's own later relative paths
+// fail in os.Getwd, and the user's shell is left in the same state. A
+// non-empty ancestor cannot be removed anyway (os.Remove refuses), so
+// equality is the only case that needs guarding.
 func (r *Repository) pruneEmptyParents(name string) {
+	cwd, cwdErr := os.Getwd()
 	for dir := path.Dir(name); dir != "." && dir != "/"; dir = path.Dir(dir) {
 		if dir == QinDir {
 			return
 		}
-		if err := os.Remove(filepath.Join(r.Path, filepath.FromSlash(dir))); err != nil {
+		full := filepath.Join(r.Path, filepath.FromSlash(dir))
+		if cwdErr == nil && sameDir(cwd, full) {
+			return
+		}
+		if err := os.Remove(full); err != nil {
 			return
 		}
 	}
+}
+
+// sameDir reports whether a and b name the same directory. It compares
+// identity rather than spelling so a working directory reached through a
+// symlink, or spelled with different but equivalent components, is still
+// recognized.
+func sameDir(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
 }

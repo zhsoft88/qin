@@ -583,6 +583,31 @@ func TestRemovePathsResolvesRelativeToCWD(t *testing.T) {
 
 // A variant invisible on this host has no worktree file of ours. A file at
 // that name belongs to the user (status calls it untracked) and must stay.
+// Removing the last file in the directory the command runs in must not remove
+// that directory: the command resolves its other pathspecs relative to it, and
+// a shell sitting there would be left without a working directory.
+func TestRemovePathsKeepsCurrentDirectory(t *testing.T) {
+	r, dir := newTempRepo(t)
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(sub, "f.txt")
+	rmWrite(t, f, "f")
+	if err := r.AddFile(f); err != nil {
+		t.Fatal(err)
+	}
+	rmCommit(t, r)
+
+	rmChdir(t, sub)
+	if _, err := r.RemovePaths([]string{"f.txt"}, RemoveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sub); err != nil {
+		t.Fatalf("current directory was removed: %v", err)
+	}
+}
+
 func TestRemovePathsInvisibleVariantKeepsWorktree(t *testing.T) {
 	r, dir := newTempRepo(t)
 	f := filepath.Join(dir, "f.txt")
