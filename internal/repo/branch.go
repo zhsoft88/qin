@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -46,9 +47,7 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 	// Remove old files using deduplicated paths (handles OS-tagged composite keys).
 	// Best-effort, as before: a path that is already gone — or that the helper
 	// refuses as leaving the repository — is left alone rather than aborting.
-	for _, path := range collectPaths(oldFiles) {
-		r.removeWorkTreeFile(path)
-	}
+	r.removeWorkTreePaths(collectPaths(oldFiles))
 
 	commit, err := r.LoadCommit(hash)
 	if err != nil {
@@ -210,6 +209,72 @@ func (r *Repository) restoreCommit(hash core.Hash) error {
 		return skippedPathsError(skipped, hostGOOS())
 	}
 	return nil
+}
+
+// removeWorkTreePaths deletes the working-tree file at each path, then removes
+// the directories the deletion left empty.
+//
+// The pruning is not housekeeping. qin tracks empty directories, so a restore
+// that deletes d/f but leaves d behind turns d into untracked content: `status`
+// reports it and a later `add .` stages it, resurrecting a directory the commit
+// being restored deleted. The old tree is the only record that d belonged to
+// content that is going away, so this is the moment to remove it.
+func (r *Repository) removeWorkTreePaths(paths []string) {
+	dirs := make(map[string]bool)
+	for _, p := range paths {
+		r.removeWorkTreeFile(p)
+		for dir := path.Dir(p); dir != "." && dir != "/"; dir = path.Dir(dir) {
+			dirs[dir] = true
+		}
+	}
+	r.pruneEmptiedDirs(dirs)
+}
+
+// pruneEmptiedDirs removes each directory in dirs that is now empty, deepest
+// first so a chain emptied in one pass collapses completely.
+//
+// os.Remove is the emptiness test: a directory still holding an untracked file,
+// a submodule checkout, or content of an OS variant invisible on this host is
+// refused and left alone, and the new tree's writes recreate with os.MkdirAll
+// anything it needs. Lstat is what keeps a tracked symlink from counting as a
+// directory — os.Remove would unlink it, and its target may be elsewhere
+// entirely. checkParentsNotSymlinks rejects a path reached through a symlinked
+// parent for the same reason; the removal above already refused to delete
+// through one.
+//
+// The process's current directory is never removed, even when it is empty: the
+// rest of the command resolves relative paths against it, and the user's shell
+// is sitting in it.
+func (r *Repository) pruneEmptiedDirs(dirs map[string]bool) {
+	if len(dirs) == 0 {
+		return
+	}
+	ordered := make([]string, 0, len(dirs))
+	for dir := range dirs {
+		ordered = append(ordered, dir)
+	}
+	// A parent is a strict prefix of its children, hence always shorter:
+	// ordering by length alone puts every child before its ancestors.
+	sort.Slice(ordered, func(i, j int) bool { return len(ordered[i]) > len(ordered[j]) })
+
+	cwd, cwdErr := os.Getwd()
+	for _, dir := range ordered {
+		if dir == QinDir || strings.HasPrefix(dir, QinDir+"/") {
+			continue
+		}
+		if err := checkParentsNotSymlinks(r.Path, dir); err != nil {
+			continue
+		}
+		full := filepath.Join(r.Path, filepath.FromSlash(dir))
+		fi, err := os.Lstat(full)
+		if err != nil || !fi.IsDir() {
+			continue
+		}
+		if cwdErr == nil && sameDir(cwd, full) {
+			continue
+		}
+		os.Remove(full)
+	}
 }
 
 // addTreeVariants records every OS variant of a tree entry in the index without

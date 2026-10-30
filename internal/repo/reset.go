@@ -59,10 +59,9 @@ func (r *Repository) ResetCommit(hash core.Hash, mode string) error {
 
 	// For hard: rewrite working tree
 	if mode == "hard" {
-		// Remove all files currently on disk
-		for _, path := range oldPaths {
-			r.removeWorkTreeFile(path)
-		}
+		// Remove all files currently on disk, and the directories that go
+		// empty with them — an empty skeleton would be untracked content.
+		r.removeWorkTreePaths(oldPaths)
 
 		// Write new files with OS filtering (like restoreCommit)
 		cOS := currentOS()
